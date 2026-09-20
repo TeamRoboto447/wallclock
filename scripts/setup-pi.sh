@@ -15,7 +15,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 sudo mkdir -p /usr/local/share/tvgui /var/lib/tvgui /etc/X11 /etc/tvgui
 sudo cp "$ROOT/py/"*.py "$ROOT/py/xsession.sh" /usr/local/share/tvgui/
-sudo chmod 755 /usr/local/share/tvgui/tvgui.py /usr/local/share/tvgui/xsession.sh
+sudo chmod 755 /usr/local/share/tvgui/tvgui.py /usr/local/share/tvgui/xsession.sh /usr/local/share/tvgui/acr.py
 sudo cp "$ROOT/deploy/tvgui-kiosk.service" /etc/systemd/system/tvgui-kiosk.service
 sudo cp "$ROOT/deploy/pw-hdmi-hold.service" /etc/systemd/system/pw-hdmi-hold.service
 sudo cp "$ROOT/deploy/blacklist-pn533.conf" /etc/modprobe.d/
