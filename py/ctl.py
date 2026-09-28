@@ -111,7 +111,7 @@ def _handle(conn, enroll_slot, event_q, state):
             f.flush()
             return
         try:
-            err = reply.get(timeout=60)
+            err = reply.get(timeout=120)
         except Empty:
             enroll_slot.clear()
             f.write(b"ERR timed out\n")
@@ -156,7 +156,7 @@ def _connect():
 
 def enroll_client(member):
     sock = _connect()
-    sock.settimeout(65)
+    sock.settimeout(125)
     sock.sendall(
         f"ENROLL\n{member.name}\n{member.pronounce}\n{member.username}\n{member.role}\n".encode()
     )

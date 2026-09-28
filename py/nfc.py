@@ -5,7 +5,7 @@ import time
 
 from attendance import IN, OUT, now_secs
 from member import Member, Role
-from tts import render_member
+from tts import enrolled_wav_path, play_wav, render_member
 import ndef
 
 BUZZER_OFF = [0xFF, 0x00, 0x52, 0x00, 0x00]
@@ -491,6 +491,13 @@ def _run(store, enroll_slot, event_q):
                 active = None
                 continue
             if job:
+                event_q.put(("status", f"Rendering speech for {job.member.name}"))
+                if not render_member(job.member, force=True):
+                    job.reply_q.put("speech render failed")
+                    event_q.put(("status", f"Enroll failed: speech render"))
+                    hold_status = True
+                    active = None
+                    continue
                 event_q.put(("status", f"Enroll {job.member.name}: tap tag to write"))
                 ok = False
                 err = "timed out"
@@ -504,14 +511,12 @@ def _run(store, enroll_slot, event_q):
                             if back != job.member:
                                 raise RuntimeError("read-back mismatch")
                             event_q.put(("status", f"Enrolled {job.member.name}"))
-                            event_q.put(("speak", f"{job.member.pronounce} enrolled"))
-                            job.reply_q.put(None)
                             threading.Thread(
-                                target=render_member,
-                                args=(job.member,),
-                                kwargs={"force": True},
+                                target=play_wav,
+                                args=(enrolled_wav_path(job.member.username),),
                                 daemon=True,
                             ).start()
+                            job.reply_q.put(None)
                             ok = True
                         except Exception as e:
                             err = str(e)
