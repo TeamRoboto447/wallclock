@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "robotics_wallclock",
+  "project_id": "ee229198-5da9-4a86-bbaf-c4336e0dbbbc"
+}
