@@ -10,7 +10,7 @@ Pi 3 KMS: if the TV is off, on another input, or EDID is late, boot logs `Cannot
 
 ## Keep the screen on (no full blank)
 
-Idle `xset dpms force off` drops TMDS; TVs leave the input and CEC cannot switch back. Stop fully blanking. A 5s black flash will not prevent LCD image persistence; keep HDMI alive, maybe dim or pixel-shift. Shop TVs are LCD.
+- [x] Idle DPMS blank disabled; HDMI stays up.
 
 ## Later
 

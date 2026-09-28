@@ -9,6 +9,7 @@ from tts import render_member
 import ndef
 
 BUZZER_OFF = [0xFF, 0x00, 0x52, 0x00, 0x00]
+PUNCH_LED = [0xFF, 0x00, 0x40, 0xEE, 0x04, 0x01, 0x01, 0x02, 0x01]
 DEBOUNCE = 2
 FACTORY_PWD = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 AUTH0_USER = 0x04
@@ -546,6 +547,10 @@ def _run(store, enroll_slot, event_q):
                     if member:
                         punch = store.toggle(member, now_secs(), DEBOUNCE)
                         if punch:
+                            try:
+                                _transmit(conn, PUNCH_LED)
+                            except Exception:
+                                pass
                             event_q.put(("greet", punch.member, punch.direction))
                             verb = "badged in" if punch.direction == IN else "badged out"
                             event_q.put(("status", f"{punch.member.name} {verb}"))

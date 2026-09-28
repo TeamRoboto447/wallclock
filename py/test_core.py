@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import os
 import tempfile
@@ -6,6 +7,7 @@ import unittest
 from attendance import IN, OUT, Store
 from member import Member, Role
 from nfc import AUTH0_USER, cfg_pages_for_storage, tag_pack, tag_pwd
+from plan import parse_md, parse_plan
 from tts import (
     PAUSE_SECS,
     _silence,
@@ -132,6 +134,67 @@ class TtsTests(unittest.TestCase):
         with wave.open(out, "rb") as w:
             frames = w.readframes(w.getnframes())
         self.assertEqual(len(frames), 400 + len(_silence(PAUSE_SECS)))
+
+
+class PlanTests(unittest.TestCase):
+    def test_parse_md(self):
+        items = parse_md(
+            "# 2018 Robot Restore\n"
+            "- [x] Wiring fix\n"
+            "- [ ] Battery Holder\n"
+        )
+        self.assertEqual(
+            items,
+            [
+                ("h", "2018 Robot Restore"),
+                ("done", "Wiring fix"),
+                ("todo", "Battery Holder"),
+            ],
+        )
+
+    def test_parse_week_of_and_event(self):
+        g = parse_plan(
+            "# Week of 9/21 - Remove Climber/Start Vision Change\n"
+            "\n"
+            "# Week of 9/28 - Tune Shooting\n"
+            "\n"
+            "10/23 - 10/24 --- BoilerBot\n",
+            today=datetime.date(2026, 9, 22),
+        )
+        self.assertEqual(g["start"].isoformat(), "2026-09-21")
+        names = [b[1] for b in g["bars"]]
+        self.assertEqual(
+            names,
+            [
+                "Remove Climber/Start Vision Change",
+                "Tune Shooting",
+                "BoilerBot",
+            ],
+        )
+        self.assertEqual(g["bars"][0][2:4], (1, 1))
+        self.assertEqual(g["bars"][1][2:4], (2, 2))
+        self.assertEqual(g["bars"][2][2:4], (5, 5))
+
+    def test_parse_plan_gantt(self):
+        g = parse_plan(
+            "# 2026\n"
+            "start: 2026-01-10\n"
+            "weeks: 8\n"
+            "- [x] Gear box 5:1 | 1-2\n"
+            "- [ ] Battery Holder | 2-4\n"
+            "- [ ] Quest Mount | 3\n"
+        )
+        self.assertEqual(g["title"], "2026")
+        self.assertEqual(g["weeks"], 8)
+        self.assertEqual(g["start"].isoformat(), "2026-01-10")
+        self.assertEqual(
+            g["bars"],
+            [
+                (True, "Gear box 5:1", 1, 2),
+                (False, "Battery Holder", 2, 4),
+                (False, "Quest Mount", 3, 3),
+            ],
+        )
 
 
 if __name__ == "__main__":
