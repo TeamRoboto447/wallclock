@@ -25,6 +25,7 @@ class Member:
         self.username = username
         self.pronounce = pronounce
         self.role = role
+        self.enabled = False
 
     def __eq__(self, other):
         return (

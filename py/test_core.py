@@ -18,6 +18,7 @@ from tts import (
     wav_path,
 )
 import ndef
+from sync_authentik import convert
 
 
 class MemberTests(unittest.TestCase):
@@ -195,6 +196,41 @@ class PlanTests(unittest.TestCase):
                 (False, "Quest Mount", 3, 3),
             ],
         )
+
+
+class SyncTests(unittest.TestCase):
+    def user(self, groups, **kw):
+        u = {"username": "jdoe", "name": "Jane Doe", "type": "internal",
+             "groups_obj": [{"name": g} for g in groups], "attributes": {}}
+        u.update(kw)
+        return u
+
+    def test_enabled_student(self):
+        m, enabled, note = convert(self.user(["Students", "Enabled", "Build"]))
+        self.assertEqual((m.role, enabled, note), (Role.STUDENT, True, None))
+
+    def test_mentor_beats_parent(self):
+        m, _, note = convert(self.user(["Parents", "Mentors"]))
+        self.assertEqual(m.role, Role.MENTOR)
+        self.assertIsNotNone(note)
+
+    def test_skips(self):
+        self.assertIsNone(convert(self.user(["Enabled"]))[0])
+        self.assertIsNone(convert(self.user(["Mentors"], type="service_account"))[0])
+        self.assertIsNone(convert(self.user(["Mentors"], username="akadmin"))[0])
+
+    def test_pronunciation(self):
+        u = self.user(["Students"], attributes={"roboto": {"pronunciation": "JAYN DOH"}})
+        self.assertEqual(convert(u)[0].pronounce, "JAYN DOH")
+
+    def test_enabled_survives_punch_upsert(self):
+        store = Store(":memory:")
+        m = Member.new("Jane Doe", "jdoe")
+        store.upsert(m)
+        store.set_enabled("jdoe", True)
+        store.toggle(m, 1000)
+        self.assertTrue(store.people()[0].enabled)
+        self.assertTrue(store.who()[0][0].enabled)
 
 
 if __name__ == "__main__":

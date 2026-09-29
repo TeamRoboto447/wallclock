@@ -23,9 +23,11 @@ RED = (0xB5, 0x04, 0x04)
 CORAL = (0xD8, 0x61, 0x3C)
 BEIGE = (0xCF, 0xCA, 0xBE)
 INK = (0xF9, 0xF9, 0xF9)
+GREEN = (0x5F, 0xD3, 0x7A)
 PANEL = (0x1A, 0x1A, 0x1A)
 BORDER = (0x3A, 0x3A, 0x3A)
 STATUS_BG = (0x3A, 0x0A, 0x0A)
+HERE_REFRESH_SECS = 30
 
 
 def db_path():
@@ -224,8 +226,8 @@ def _draw_here(surf, rect, mentors, students, parents, font_sm, now):
         if not _clip_blit(surf, img, (x, y), rect):
             break
         y += 32
-        for name, ts in names:
-            ns = font_sm.render(name, True, INK)
+        for name, ts, enabled in names:
+            ns = font_sm.render(name, True, GREEN if enabled else INK)
             dur = font_sm.render(fmt_in(ts, now), True, BEIGE)
             if not _clip_blit(surf, ns, (x, y), rect):
                 return
@@ -393,6 +395,7 @@ def kiosk():
         plan_mtime,
         today_mtime,
     )
+    last_refresh = now
     last_active = time.monotonic()
     blanked = False
     drew_black = False
@@ -460,6 +463,12 @@ def kiosk():
             state["students"] = students
             state["parents"] = parents
         now = int(time.time())
+        if now - last_refresh >= HERE_REFRESH_SECS:
+            last_refresh = now
+            try:
+                mentors, students, parents = split_here(store.who())
+            except Exception as e:
+                print(f"refresh: {e}", flush=True)
         plan, plan_mtime = load_plan(plan_path())
         today_items, today_mtime = load_md(today_path())
         new_key = (

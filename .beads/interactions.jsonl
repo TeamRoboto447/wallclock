@@ -1,0 +1,1 @@
+{"id":"int-6841783b01366f7e04be3576309632aa","kind":"field_change","created_at":"2026-09-29T00:38:11.315802668Z","actor":"Moonlit Productions","issue_id":"robotics-wallclock-r28","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Option A sync + green Enabled deployed and verified on Pi kiosk; 5-min timer"}}

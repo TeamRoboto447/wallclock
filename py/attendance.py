@@ -39,6 +39,12 @@ class Store:
             )
         except sqlite3.OperationalError:
             pass
+        try:
+            self.conn.execute(
+                "ALTER TABLE people ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
         self.conn.commit()
 
     def upsert(self, member):
@@ -47,6 +53,13 @@ class Store:
                ON CONFLICT(username) DO UPDATE SET
                  name=excluded.name, pronounce=excluded.pronounce, role=excluded.role""",
             (member.username, member.name, member.pronounce, member.role),
+        )
+        self.conn.commit()
+
+    def set_enabled(self, username, enabled):
+        self.conn.execute(
+            "UPDATE people SET enabled=? WHERE username=?",
+            (int(bool(enabled)), username),
         )
         self.conn.commit()
 
@@ -68,19 +81,20 @@ class Store:
 
     def people(self):
         rows = self.conn.execute(
-            """SELECT username, name, pronounce, role FROM people
+            """SELECT username, name, pronounce, role, enabled FROM people
                ORDER BY name COLLATE NOCASE"""
         ).fetchall()
         out = []
-        for username, name, pronounce, role in rows:
+        for username, name, pronounce, role, enabled in rows:
             m = Member.new(name, username, pronounce, Role.parse(role) or Role.STUDENT)
             if m:
+                m.enabled = bool(enabled)
                 out.append(m)
         return out
 
     def who(self):
         rows = self.conn.execute(
-            """SELECT p.username, p.name, p.pronounce, p.role, x.ts
+            """SELECT p.username, p.name, p.pronounce, p.role, p.enabled, x.ts
                 FROM people p
                 JOIN (
                   SELECT username, MAX(id) AS id FROM punches GROUP BY username
@@ -90,9 +104,10 @@ class Store:
                 ORDER BY p.name COLLATE NOCASE"""
         ).fetchall()
         out = []
-        for username, name, pronounce, role, ts in rows:
+        for username, name, pronounce, role, enabled, ts in rows:
             m = Member.new(name, username, pronounce, Role.parse(role) or Role.STUDENT)
             if m:
+                m.enabled = bool(enabled)
                 out.append((m, ts))
         return out
 

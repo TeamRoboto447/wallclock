@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync tvgui roster from Authentik
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lvuser
+Group=lvuser
+EnvironmentFile=/etc/tvgui/kiosk.env
+Environment=TVGUI_DB=/var/lib/tvgui/attendance.sqlite
+WorkingDirectory=/var/lib/tvgui
+ExecStart=/usr/bin/python3 /usr/local/share/tvgui/sync_authentik.py
