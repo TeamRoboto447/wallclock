@@ -26,6 +26,7 @@ class Member:
         self.pronounce = pronounce
         self.role = role
         self.enabled = False
+        self.closed_secs = 0  # time in completed sessions, set by Store
 
     def __eq__(self, other):
         return (

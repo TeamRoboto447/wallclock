@@ -1,0 +1,18 @@
+[Unit]
+Description=Poll Leantime for tvgui plan/today changes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=lvuser
+Group=lvuser
+EnvironmentFile=/etc/tvgui/kiosk.env
+Environment=LEANTIME_INTERVAL=15
+Environment=LEANTIME_ROLL_FORWARD=1
+WorkingDirectory=/var/lib/tvgui
+ExecStart=/usr/bin/python3 -u /usr/local/share/tvgui/sync_leantime.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

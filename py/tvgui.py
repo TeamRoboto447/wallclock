@@ -9,11 +9,11 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from attendance import Store
+from attendance import Store, year_start
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from nfc import EnrollSlot, split_here, start as nfc_start
-from plan import current_week, load_md, load_plan, plan_path, today_path
+from plan import current_week, load_md, load_plan, plan_path, priority_path, today_path
 from tts import backfill, play_greet, say, say_ready
 
 W, H = 1920, 1080
@@ -24,10 +24,20 @@ CORAL = (0xD8, 0x61, 0x3C)
 BEIGE = (0xCF, 0xCA, 0xBE)
 INK = (0xF9, 0xF9, 0xF9)
 GREEN = (0x5F, 0xD3, 0x7A)
+BLUE = (0x4A, 0x9E, 0xE0)
+YELLOW = (0xE6, 0xB4, 0x22)
+LTRED = (0xE5, 0x48, 0x4D)
+STATUS_COLOR = {"new": BLUE, "wip": YELLOW, "blocked": LTRED, "done": GREEN}
+MD_MARK = {"todo": ("[ ]", BLUE), "wip": ("[~]", YELLOW), "blocked": ("[!]", LTRED), "done": ("[x]", GREEN)}
 PANEL = (0x1A, 0x1A, 0x1A)
 BORDER = (0x3A, 0x3A, 0x3A)
+GRID = (0x2A, 0x2A, 0x2A)
 STATUS_BG = (0x3A, 0x0A, 0x0A)
 HERE_REFRESH_SECS = 30
+CYCLE_SECS = 10
+GANTT_HEAD_H = 48
+GANTT_ROW_H = 32
+GANTT_PAD = 12
 
 
 def db_path():
@@ -160,6 +170,11 @@ def fmt_in(ts, now):
     return f"{h}:{m:02d}"
 
 
+def fmt_total(secs):
+    h, m = divmod(max(0, int(secs)) // 60, 60)
+    return f"{h}:{m:02d}"
+
+
 DONE = (0x7A, 0x7A, 0x72)
 MUTED = (0x6A, 0x6A, 0x62)
 
@@ -193,16 +208,13 @@ def _draw_md(surf, rect, title, items, font_mid, font_sm):
                 break
             y += 40
             continue
-        if kind == "done":
-            mark, color = "[x]", DONE
-        elif kind == "todo":
-            mark, color = "[ ]", INK
-        else:
-            mark, color = "", INK
+        mark, color = MD_MARK.get(kind, ("", INK))
         line = f"{mark} {text}".strip()
         img = font_sm.render(line, True, color)
         if img.get_width() > max_w:
-            img = font_sm.render(line[:80] + "…", True, color)
+            while len(line) > 1 and font_sm.size(line + "…")[0] > max_w:
+                line = line[:-1]
+            img = font_sm.render(line.rstrip() + "…", True, color)
         if not _clip_blit(surf, img, (x, y), rect):
             break
         y += 32
@@ -213,6 +225,15 @@ def _draw_here(surf, rect, mentors, students, parents, font_sm, now):
 
     pygame.draw.rect(surf, PANEL, rect)
     surf.blit(font_sm.render("who's here", True, BEIGE), (rect.x + 20, rect.y + 16))
+    total_r = rect.right - 20
+    meet_r = total_r - 100
+    for label, right in (("meeting", meet_r), ("total", total_r)):
+        img = font_sm.render(label, True, MUTED)
+        surf.blit(img, (right - img.get_width(), rect.y + 16))
+    grid_top = rect.y + 46
+    for gx in (meet_r - 78, meet_r + 22):
+        pygame.draw.line(surf, GRID, (gx, grid_top), (gx, rect.bottom - 8), 1)
+    pygame.draw.line(surf, GRID, (rect.x + 8, grid_top), (rect.right - 8, grid_top), 1)
     y = rect.y + 52
     x = rect.x + 20
     for label, names in (
@@ -226,12 +247,21 @@ def _draw_here(surf, rect, mentors, students, parents, font_sm, now):
         if not _clip_blit(surf, img, (x, y), rect):
             break
         y += 32
-        for name, ts, enabled in names:
-            ns = font_sm.render(name, True, GREEN if enabled else INK)
-            dur = font_sm.render(fmt_in(ts, now), True, BEIGE)
+        for name, ts, enabled, closed in names:
+            color = GREEN if enabled else INK
+            max_name = meet_r - 84 - x
+            while len(name) > 1 and font_sm.size(name)[0] > max_name:
+                name = name[:-1]
+            ns = font_sm.render(name, True, color)
+            meet = font_sm.render(fmt_in(ts, now), True, BEIGE)
+            tot = font_sm.render(
+                fmt_total(closed + max(0, now - max(int(ts), year_start(now)))), True, BEIGE
+            )
             if not _clip_blit(surf, ns, (x, y), rect):
                 return
-            surf.blit(dur, (x + 8 + ns.get_width(), y))
+            surf.blit(meet, (meet_r - meet.get_width(), y))
+            surf.blit(tot, (total_r - tot.get_width(), y))
+            pygame.draw.line(surf, GRID, (rect.x + 8, y + 28), (rect.right - 8, y + 28), 1)
             y += 30
         y += 10
 
@@ -244,14 +274,14 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
     surf.blit(font_sm.render(title, True, BEIGE), (rect.x + 16, rect.y + 12))
     weeks = max(1, int(plan.get("weeks") or 8))
     bars = plan.get("bars") or []
-    label_w = 160
-    head_h = 48
-    row_h = 32
+    label_w = 290
+    head_h = GANTT_HEAD_H
+    row_h = GANTT_ROW_H
     grid = pygame.Rect(
         rect.x + 16 + label_w,
         rect.y + head_h,
         rect.width - 32 - label_w,
-        rect.height - head_h - 12,
+        rect.height - head_h - GANTT_PAD,
     )
     if grid.width < 40 or grid.height < 24:
         return
@@ -259,7 +289,11 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
     for i in range(weeks):
         x = int(grid.x + i * col_w)
         pygame.draw.line(surf, BORDER, (x, grid.y), (x, grid.bottom - 1), 1)
-        tick = font_sm.render(f"W{i + 1}", True, MUTED)
+        label = f"W{i + 1}"
+        if plan.get("start"):
+            d = plan["start"] + datetime.timedelta(days=7 * i)
+            label += f" {d.month}/{d.day}"
+        tick = font_sm.render(label, True, MUTED)
         surf.blit(tick, (x + 4, rect.y + 20))
     pygame.draw.line(surf, BORDER, (grid.right - 1, grid.y), (grid.right - 1, grid.bottom - 1), 1)
     cur = current_week(plan.get("start"), weeks, now)
@@ -267,21 +301,47 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
         cx = int(grid.x + (cur - 0.5) * col_w)
         pygame.draw.line(surf, RED, (cx, grid.y), (cx, grid.bottom - 1), 2)
     y = grid.y
-    for done, name, lo, hi in bars:
+    for status, name, lo, hi in bars:
         if y + row_h > grid.bottom:
             break
-        label = font_sm.render(name[:22], True, INK)
+        if font_sm.size(name)[0] > label_w - 12:
+            while len(name) > 1 and font_sm.size(name + "…")[0] > label_w - 12:
+                name = name[:-1]
+            name = name.rstrip() + "…"
+        label = font_sm.render(name, True, INK)
         surf.blit(label, (rect.x + 16, y + 4))
         if lo and hi:
             x0 = int(grid.x + (lo - 1) * col_w) + 3
             x1 = int(grid.x + hi * col_w) - 3
             bar = pygame.Rect(x0, y + 6, max(4, x1 - x0), row_h - 12)
-            if done:
-                pygame.draw.rect(surf, CORAL, bar)
-            else:
-                pygame.draw.rect(surf, PANEL, bar)
-                pygame.draw.rect(surf, BEIGE, bar, 2)
+            pygame.draw.rect(surf, STATUS_COLOR.get(status, BLUE), bar)
         y += row_h
+
+
+def today_pages(items, cap):
+    """Split md items into pages of at most cap task rows, one tag per page."""
+    groups = []
+    for kind, text in items:
+        if kind == "h" or not groups:
+            groups.append((text if kind == "h" else None, []))
+            if kind == "h":
+                continue
+        groups[-1][1].append((kind, text))
+    pages = []
+    for head, rows in groups:
+        if not rows and head is None:
+            continue
+        chunks = [rows[i:i + cap] for i in range(0, len(rows), cap)] or [[]]
+        for c in chunks:
+            pages.append(([("h", head)] if head else []) + c)
+    return pages
+
+
+def plan_height(plan, cap):
+    if not plan.get("bars"):
+        return min(cap, 120)
+    need = GANTT_HEAD_H + len(plan["bars"]) * GANTT_ROW_H + GANTT_PAD
+    return min(cap, need)
 
 
 def compose(
@@ -296,6 +356,7 @@ def compose(
     now,
     plan,
     today_items,
+    priority_items,
 ):
     import pygame
 
@@ -309,24 +370,39 @@ def compose(
     col_top = pad + 56
     col_h = h - col_top - status_h - pad * 2
     gap = pad
-    left_w = (w - pad * 2 - gap) // 3
+    left_w = w // 4 - pad
     right_x = pad + left_w + gap
     right_w = w - pad - right_x
-    plan_h = (col_h - gap) // 2
+    plan_h = plan_height(plan, (col_h - gap) // 2)
     left = pygame.Rect(pad, col_top, left_w, col_h)
     plan_r = pygame.Rect(right_x, col_top, right_w, plan_h)
-    today_r = pygame.Rect(right_x, col_top + plan_h + gap, right_w, col_h - plan_h - gap)
+    task_top = col_top + plan_h + gap
+    task_h = col_h - plan_h - gap
+    task_w = (right_w - gap) // 2
+    pri_r = pygame.Rect(right_x, task_top, task_w, task_h)
+    today_r = pygame.Rect(right_x + task_w + gap, task_top, right_w - task_w - gap, task_h)
     _draw_here(surf, left, mentors, students, parents, font_sm, now)
     if plan.get("bars"):
         _draw_gantt(surf, plan_r, plan, font_mid, font_sm, now)
     else:
         _draw_md(surf, plan_r, "plan", plan.get("items") or [], font_mid, font_sm)
-    _draw_md(surf, today_r, "today", today_items, font_mid, font_sm)
+    _draw_md(surf, pri_r, "priority", priority_items, font_mid, font_sm)
+    pages = today_pages(today_items, max(1, (today_r.height - 128) // 32))
+    if len(pages) > 1:
+        i = (now // CYCLE_SECS) % len(pages)
+        _draw_md(surf, today_r, f"all tasks ({i + 1}/{len(pages)})", pages[i], font_mid, font_sm)
+    else:
+        _draw_md(surf, today_r, "all tasks", pages[0] if pages else [], font_mid, font_sm)
 
     st = pygame.Rect(pad, h - pad - status_h, w - pad * 2, status_h)
     pygame.draw.rect(surf, STATUS_BG, st)
     surf.blit(font_sm.render("Badge reader", True, CORAL), (st.x + 18, st.y + 16))
     surf.blit(font_mid.render(status, True, INK), (st.x + 18, st.y + 48))
+    dt = datetime.datetime.fromtimestamp(now)
+    clock = font_big.render(dt.strftime("%I:%M %p").lstrip("0"), True, INK)
+    date = font_sm.render(dt.strftime("%a %b ") + str(dt.day), True, BEIGE)
+    surf.blit(clock, (st.right - 18 - clock.get_width(), st.y + 30))
+    surf.blit(date, (st.right - 18 - date.get_width(), st.y + 30 + clock.get_height() + 4))
     return surf
 
 
@@ -371,6 +447,7 @@ def kiosk():
     now = int(time.time())
     plan, plan_mtime = load_plan(plan_path())
     today_items, today_mtime = load_md(today_path())
+    priority_items, priority_mtime = load_md(priority_path())
     surf = compose(
         size,
         font_big,
@@ -383,6 +460,7 @@ def kiosk():
         now,
         plan,
         today_items,
+        priority_items,
     )
     tex = present(renderer, surf)
     save_ui(surf, state)
@@ -391,9 +469,10 @@ def kiosk():
         tuple(students),
         tuple(parents),
         status,
-        now // 60,
+        now // CYCLE_SECS,
         plan_mtime,
         today_mtime,
+        priority_mtime,
     )
     last_refresh = now
     last_active = time.monotonic()
@@ -471,15 +550,17 @@ def kiosk():
                 print(f"refresh: {e}", flush=True)
         plan, plan_mtime = load_plan(plan_path())
         today_items, today_mtime = load_md(today_path())
+        priority_items, priority_mtime = load_md(priority_path())
         new_key = (
             tuple(mentors),
             tuple(students),
             tuple(parents),
             status,
             blanked,
-            now // 60,
+            now // CYCLE_SECS,
             plan_mtime,
             today_mtime,
+            priority_mtime,
         )
         try:
             if blanked:
@@ -505,6 +586,7 @@ def kiosk():
                     now,
                     plan,
                     today_items,
+                    priority_items,
                 )
                 tex = present(renderer, surf)
                 save_ui(surf, state)

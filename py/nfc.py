@@ -23,7 +23,7 @@ CFG_PAGES = {
 def split_here(who):
     mentors, students, parents = [], [], []
     for m, ts in who:
-        row = (m.name, ts, m.enabled)
+        row = (m.name, ts, m.enabled, m.closed_secs)
         if m.role == Role.MENTOR:
             mentors.append(row)
         elif m.role == Role.PARENT:

@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from attendance import IN, OUT, Store
+from attendance import IN, OUT, Store, year_start
 from member import Member, Role
 from nfc import AUTH0_USER, cfg_pages_for_storage, tag_pack, tag_pwd
 from plan import parse_md, parse_plan
@@ -18,7 +18,12 @@ from tts import (
     wav_path,
 )
 import ndef
-from sync_authentik import convert
+from sync_authentik import convert, display_names
+from sync_leantime import (
+    is_priority, overdue, render_plan, render_today, roll_values, week_deadline,
+)
+from tvgui import fmt_total, plan_height, today_pages
+from nfc import split_here
 
 
 class MemberTests(unittest.TestCase):
@@ -191,9 +196,9 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(
             g["bars"],
             [
-                (True, "Gear box 5:1", 1, 2),
-                (False, "Battery Holder", 2, 4),
-                (False, "Quest Mount", 3, 3),
+                ("done", "Gear box 5:1", 1, 2),
+                ("new", "Battery Holder", 2, 4),
+                ("new", "Quest Mount", 3, 3),
             ],
         )
 
@@ -223,6 +228,84 @@ class SyncTests(unittest.TestCase):
         u = self.user(["Students"], attributes={"roboto": {"pronunciation": "JAYN DOH"}})
         self.assertEqual(convert(u)[0].pronounce, "JAYN DOH")
 
+    def test_display_names(self):
+        people = [
+            ("Ryan Mejeur", None), ("Ryan Sallee", None), ("Darrin Thompson", None),
+            ("Nathan Rockhill", "Nathan (KE9BCL)"), ("Jon Mejeur", None),
+        ]
+        self.assertEqual(
+            display_names(people),
+            ["Ryan M", "Ryan S", "Darrin", "Nathan (KE9BCL)", "Jon"],
+        )
+
+    def test_display_names_badge_counts_and_full_fallback(self):
+        # a badge name doesn't hide the real first name from the clash check
+        self.assertEqual(
+            display_names([("Nathan Rockhill", "Nate"), ("Nathan Lee", None)]),
+            ["Nate", "Nathan L"],
+        )
+        # same first name and last initial: fall back to full names
+        self.assertEqual(
+            display_names([("Sam Lee", None), ("Sam Long", None)]),
+            ["Sam Lee", "Sam Long"],
+        )
+
+    def test_scan_keeps_stored_name(self):
+        store = Store(":memory:")
+        store.upsert(Member.new("Jane", "jdoe", "Jane Doe"))
+        tag = Member.new("Jane Doe", "jdoe", "Jane Doe")
+        self.assertEqual(store.toggle(tag, 1000).member.name, "Jane")
+        self.assertEqual(store.who()[0][0].name, "Jane")
+
+    def test_scan_stores_badge_pronunciation(self):
+        store = Store(":memory:")
+        store.upsert(Member.new("Jane", "jdoe", "Jane Doe"))  # synced value
+        tag = Member.new("Jane Doe", "jdoe", "JAYN DOH")
+        store.toggle(tag, 1000)
+        self.assertEqual(store.tag_pronunciations(), [("jdoe", "Jane", "Jane Doe", "JAYN DOH")])
+        self.assertEqual(store.people()[0].pronounce, "Jane Doe")  # synced value untouched
+        store.upsert(Member.new("Jane", "jdoe", "Jane D"))  # a sync run
+        self.assertEqual(store.tag_pronunciations()[0][3], "JAYN DOH")
+
+    def test_sync_prefers_authentik_then_badge_pronunciation(self):
+        store = Store(":memory:")
+        users = [
+            self.user(["Students"], username="a", name="Ann Lee"),
+            self.user(["Students"], username="b", name="Bo Kim",
+                      attributes={"roboto": {"pronunciation": "BOH"}}),
+            self.user(["Students"], username="c", name="Cy Fox"),
+        ]
+        for u, t in (("a", "AN"), ("b", "BEE"), ("c", None)):
+            store.upsert(Member.new("x", u, "x"))
+            if t:
+                store.set_tag_pronounce(u, t)
+        from sync_authentik import sync
+        sync(users, store)
+        got = {p.username: p.pronounce for p in store.people()}
+        self.assertEqual(got, {"a": "AN", "b": "BOH", "c": "Cy Fox"})
+
+    def test_closed_secs_and_split_here_rows(self):
+        store = Store(":memory:")
+        m = Member.new("Jane Doe", "jdoe")
+        b = year_start()
+        for ts in (b + 1000, b + 4600, b + 10000):  # out after 3600s, then in (open)
+            store.toggle(m, ts)
+        self.assertEqual(store.closed_secs(), {"jdoe": 3600})
+        _, students, _ = split_here(store.who())
+        self.assertEqual(students, [("Jane Doe", b + 10000, False, 3600)])
+        self.assertEqual(fmt_total(3600 + 125), "1:02")
+        self.assertEqual(fmt_total(37 * 3600 + 1800), "37:30")
+
+    def test_totals_reset_at_january_first(self):
+        store = Store(":memory:")
+        m = Member.new("Jane Doe", "jdoe")
+        jan1 = year_start(datetime.datetime(2026, 6, 1).timestamp())
+        self.assertEqual(jan1, int(datetime.datetime(2026, 1, 1).timestamp()))
+        for ts in (jan1 - 3600, jan1 + 1800, jan1 + 5000, jan1 + 6000):
+            store.toggle(m, ts)  # session across new year (1800s counts), then 1000s
+        self.assertEqual(store.closed_secs(jan1), {"jdoe": 1800 + 1000})
+        self.assertEqual(store.closed_secs(), {"jdoe": 5400 + 1000})
+
     def test_enabled_survives_punch_upsert(self):
         store = Store(":memory:")
         m = Member.new("Jane Doe", "jdoe")
@@ -231,6 +314,121 @@ class SyncTests(unittest.TestCase):
         store.toggle(m, 1000)
         self.assertTrue(store.people()[0].enabled)
         self.assertTrue(store.who()[0][0].enabled)
+
+
+class LeantimeRenderTests(unittest.TestCase):
+    def test_plan(self):
+        ms = [
+            {"headline": "Event", "editFrom": "2026-10-23 19:00:00", "editTo": "2026-10-24 19:00:00"},
+            {"headline": "Week A", "editFrom": "2026-09-28 19:00:00", "editTo": "2026-10-04 19:00:00"},
+        ]
+        self.assertEqual(
+            render_plan(ms), "# [ ] Week of 9/28 - Week A\n\n[ ] 10/23 - 10/24 --- Event\n"
+        )
+
+    def test_plan_status_roundtrip(self):
+        ms = [
+            {"headline": "A", "editFrom": "2026-09-28", "editTo": "2026-10-04", "status": 4},
+            {"headline": "B", "editFrom": "2026-10-23", "editTo": "2026-10-24", "status": 0},
+        ]
+        g = parse_plan(render_plan(ms), today=datetime.date(2026, 9, 28))
+        self.assertEqual([(b[0], b[1]) for b in g["bars"]], [("wip", "A"), ("done", "B")])
+
+    def test_done_past_milestone_hidden(self):
+        ms = [
+            {"headline": "Old", "editFrom": "2026-09-14", "editTo": "2026-09-20", "status": 0},
+            {"headline": "Old undone", "editFrom": "2026-09-14", "editTo": "2026-09-20", "status": 3},
+            {"headline": "Done today", "editFrom": "2026-09-21", "editTo": "2026-09-28", "status": 0},
+        ]
+        out = render_plan(ms, today=datetime.date(2026, 9, 28))
+        self.assertNotIn("Old\n", out.replace("Old undone", ""))
+        self.assertIn("Old undone", out)
+        self.assertIn("Done today", out)
+
+    def test_ui_style_dates_use_leantime_timezone(self):
+        # The UI stores Sun 9/21 00:00 -> Sun 9/27 23:59:59 (Los Angeles) as UTC.
+        done = {"headline": "Old", "status": 0,
+                "editFrom": "2026-09-21 07:00:00", "editTo": "2026-09-28 06:59:59"}
+        event = {"headline": "Ev", "status": 1,
+                 "editFrom": "2026-10-23 07:00:00", "editTo": "2026-10-25 06:59:59"}
+        self.assertEqual(render_plan([done], today=datetime.date(2026, 9, 27)),
+                         "# [x] Week of 9/21 - Old\n")
+        self.assertEqual(render_plan([done], today=datetime.date(2026, 9, 28)), "")
+        self.assertEqual(render_plan([event], today=datetime.date(2026, 10, 1)),
+                         "[!] 10/23 - 10/24 --- Ev\n")
+
+    def test_priority_filter(self):
+        mk = lambda p, s: {"priority": p, "status": s}
+        self.assertTrue(is_priority(mk("2", 3)))
+        self.assertTrue(is_priority(mk(1, 4)))
+        self.assertFalse(is_priority(mk("3", 3)))
+        self.assertFalse(is_priority(mk("1", 0)))
+        self.assertFalse(is_priority(mk(None, 3)))
+
+    def test_week_deadline_is_sunday(self):
+        for day in range(28, 32):  # Mon 2026-09-28 .. Thu 10-01
+            d = datetime.date(2026, 9, 28) + datetime.timedelta(days=day - 28)
+            self.assertEqual(week_deadline(d), datetime.date(2026, 10, 4))
+        self.assertEqual(week_deadline(datetime.date(2026, 10, 4)), datetime.date(2026, 10, 4))
+
+    def test_overdue(self):
+        today = datetime.date(2026, 9, 28)
+        mk = lambda s, a, b, typ="milestone": {
+            "type": typ, "status": s, "editFrom": a + " 19:00:00", "editTo": b + " 19:00:00"}
+        self.assertTrue(overdue(mk(3, "2026-09-14", "2026-09-20"), today))
+        self.assertTrue(overdue(mk(1, "2026-09-14", "2026-09-20"), today))  # blocked
+        self.assertTrue(overdue(mk(4, "2026-09-14", "2026-09-27"), today))  # in progress
+        self.assertFalse(overdue(mk(0, "2026-09-14", "2026-09-20"), today))  # done
+        self.assertFalse(overdue(mk(3, "2026-09-21", "2026-09-28"), today))  # ends today
+        self.assertFalse(overdue(mk(3, "2026-09-14", "2026-09-20", "task"), today))
+        self.assertFalse(overdue({"type": "milestone", "status": 3,
+                                  "editFrom": "0000-00-00 00:00:00", "editTo": "0000-00-00 00:00:00"}, today))
+
+    def test_roll_values_shifts_and_keeps_fields(self):
+        m = {"id": 5, "headline": "h", "type": "milestone", "status": 3, "tags": "#1f77b4",
+             "dateToFinish": "0000-00-00 00:00:00", "editFrom": "2026-09-14 19:00:00",
+             "editTo": "2026-09-20 19:00:00", "timeFrom": None, "description": "d"}
+        v = roll_values(m, datetime.date(2026, 9, 30))  # Wed; week ends Sun 10/4
+        self.assertEqual((v["editFrom"], v["editTo"]), ("2026-09-28", "2026-10-04"))
+        self.assertEqual((v["tags"], v["description"], v["dateToFinish"], v["timeFrom"]), ("#1f77b4", "d", "", ""))
+        ev = dict(m, editFrom="2026-09-14 19:00:00", editTo="2026-09-15 19:00:00")  # 1-day event
+        v = roll_values(ev, datetime.date(2026, 9, 30))
+        self.assertEqual((v["editFrom"], v["editTo"]), ("2026-10-03", "2026-10-04"))
+
+    def test_md_statuses(self):
+        text = "- [ ] a\n- [~] b\n- [!] c\n- [x] d\n"
+        self.assertEqual([k for k, _ in parse_md(text)], ["todo", "wip", "blocked", "done"])
+
+    def test_today_groups_and_status(self):
+        ts = [
+            {"id": 2, "type": "task", "status": 0, "tags": "B", "headline": "two"},
+            {"id": 1, "type": "task", "status": 3, "tags": "", "headline": "one"},
+            {"id": 3, "type": "task", "status": -1, "tags": "B", "headline": "archived"},
+            {"id": 4, "type": "milestone", "status": 3, "tags": "", "headline": "ms"},
+        ]
+        self.assertEqual(render_today(ts), "# Other\n- [ ] one\n\n# B\n- [x] two\n")
+
+
+class LayoutTests(unittest.TestCase):
+    def test_today_pages_one_per_tag_and_paginate(self):
+        items = [("h", "A"), ("todo", "1"), ("todo", "2"), ("todo", "3"), ("h", "B"), ("done", "x")]
+        pages = today_pages(items, 2)
+        self.assertEqual(
+            pages,
+            [
+                [("h", "A"), ("todo", "1"), ("todo", "2")],
+                [("h", "A"), ("todo", "3")],
+                [("h", "B"), ("done", "x")],
+            ],
+        )
+
+    def test_today_pages_empty(self):
+        self.assertEqual(today_pages([], 5), [])
+
+    def test_plan_height_scales_and_caps(self):
+        bars = lambda n: {"bars": [("new", "x", 1, 1)] * n}
+        self.assertEqual(plan_height(bars(2), 400), 48 + 2 * 32 + 12)
+        self.assertEqual(plan_height(bars(50), 400), 400)
 
 
 if __name__ == "__main__":

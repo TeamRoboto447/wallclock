@@ -7,6 +7,8 @@ WEEK_OF_RE = re.compile(
     r"^#+\s*Week of\s+(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\s*[-–—:]\s*(.+)$",
     re.I,
 )
+MARK_RE = re.compile(r"^(#*)\s*\[([ x~!])\]\s*")
+STATUS = {" ": "new", "~": "wip", "!": "blocked", "x": "done"}
 EVENT_RE = re.compile(
     r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\s*[-–—]\s*"
     r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\s*[-–—]+\s*(.+)$"
@@ -27,6 +29,10 @@ def today_path():
     return os.path.join(board_dir(), "today.md")
 
 
+def priority_path():
+    return os.path.join(board_dir(), "priority.md")
+
+
 def parse_md(text):
     items = []
     for line in (text or "").splitlines():
@@ -39,6 +45,10 @@ def parse_md(text):
             items.append(("h", s.lstrip("#").strip()))
         elif s.lower().startswith("- [x]"):
             items.append(("done", _strip_range(s[5:].strip())))
+        elif s.startswith("- [~]"):
+            items.append(("wip", _strip_range(s[5:].strip())))
+        elif s.startswith("- [!]"):
+            items.append(("blocked", _strip_range(s[5:].strip())))
         elif s.startswith("- [ ]"):
             items.append(("todo", _strip_range(s[5:].strip())))
         elif s.startswith("- "):
@@ -109,11 +119,16 @@ def parse_plan(text, today=None):
             except ValueError:
                 weeks = None
             continue
+        status = "new"
+        mm = MARK_RE.match(s)
+        if mm:
+            status = STATUS[mm.group(2)]
+            s = f"{mm.group(1)} {s[mm.end():]}".strip()
         wm = WEEK_OF_RE.match(s)
         if wm:
             d = _mdy(wm.group(1), wm.group(2), wm.group(3), today.year)
             mon = _monday(d)
-            dated.append((False, wm.group(4).strip(), mon, mon + datetime.timedelta(days=6)))
+            dated.append((status, wm.group(4).strip(), mon, mon + datetime.timedelta(days=6)))
             continue
         em = EVENT_RE.match(s)
         if em:
@@ -121,25 +136,28 @@ def parse_plan(text, today=None):
             b = _mdy(em.group(4), em.group(5), em.group(6), today.year)
             if b < a:
                 a, b = b, a
-            dated.append((False, em.group(7).strip(), a, b))
+            dated.append((status, em.group(7).strip(), a, b))
             continue
         if s.startswith("#") and not title:
             title = s.lstrip("#").strip()
             continue
-        done = None
         body = None
         if s.lower().startswith("- [x]"):
-            done, body = True, s[5:].strip()
+            status, body = "done", s[5:].strip()
+        elif s.startswith("- [~]"):
+            status, body = "wip", s[5:].strip()
+        elif s.startswith("- [!]"):
+            status, body = "blocked", s[5:].strip()
         elif s.startswith("- [ ]"):
-            done, body = False, s[5:].strip()
+            status, body = "new", s[5:].strip()
         elif s.startswith("- "):
-            done, body = False, s[2:].strip()
+            status, body = "new", s[2:].strip()
         if body is None:
             continue
         lo, hi = _range(body)
         name = _strip_range(body)
         if name:
-            numbered.append((done, name, lo, hi))
+            numbered.append((status, name, lo, hi))
     if dated:
         first = min(a for _, _, a, _ in dated)
         last = max(b for _, _, _, b in dated)
@@ -151,13 +169,13 @@ def parse_plan(text, today=None):
     if weeks is None:
         weeks = 8
     bars = []
-    for done, name, a, b in dated:
+    for status, name, a, b in dated:
         lo = (a - start).days // 7 + 1 if start else None
         hi = (b - start).days // 7 + 1 if start else None
         if lo is not None:
             lo = max(1, lo)
             hi = min(weeks, max(lo, hi))
-        bars.append((done, name, lo, hi))
+        bars.append((status, name, lo, hi))
     bars.extend(numbered)
     return {
         "start": start,

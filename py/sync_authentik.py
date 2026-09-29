@@ -52,16 +52,53 @@ def convert(user):
     return m, ENABLED_GROUP in groups, note
 
 
+def authentik_pronunciation(user):
+    roboto = (user.get("attributes") or {}).get("roboto") or {}
+    return (roboto.get("pronunciation") or "").strip() or None
+
+
+def badge_name(user):
+    roboto = (user.get("attributes") or {}).get("roboto") or {}
+    return (roboto.get("badge_name") or "").strip() or None
+
+
+def display_names(people):
+    """people: [(full_name, badge_name_or_None)] -> display name for each.
+    A badge_name is used verbatim. Otherwise the first name, or 'First L' when
+    another member has the same first name, or the full name if that still clashes."""
+    firsts = [full.split()[0].lower() for full, _ in people]
+    out = []
+    for (full, badge), first in zip(people, firsts):
+        if badge:
+            out.append(badge)
+            continue
+        parts = full.split()
+        out.append(parts[0] if firsts.count(first) == 1 or len(parts) < 2
+                   else f"{parts[0]} {parts[-1][0].upper()}")
+    short = list(out)
+    for i, (full, badge) in enumerate(people):
+        if not badge and short.count(short[i]) > 1:
+            out[i] = full
+    return out
+
+
 def sync(users, store, dry_run=False):
     added = updated = 0
     notes = []
     known = {p.username: p for p in store.people()}
+    converted = []
     for u in users:
         m, enabled, note = convert(u)
         if note:
             notes.append(note)
-        if not m:
-            continue
+        if m:
+            converted.append((u, m, enabled))
+    names = display_names([(m.name, badge_name(u)) for u, m, _ in converted])
+    badge_says = {u: t for u, _, _, t in store.tag_pronunciations() if t}
+    for (u, m, enabled), display in zip(converted, names):
+        m.name = display
+        if not authentik_pronunciation(u) and m.username in badge_says:
+            m.pronounce = badge_says[m.username]  # better than the bare full name
         old = known.get(m.username)
         if old is None:
             added += 1
@@ -71,7 +108,7 @@ def sync(users, store, dry_run=False):
             store.upsert(m)
             store.set_enabled(m.username, enabled)
         print(f"{'+' if old is None else '~' if (old != m or old.enabled != enabled) else '='} "
-              f"{m.username:<14} {m.role:<8} {'enabled' if enabled else ''}")
+              f"{m.username:<14} {m.role:<8} {m.name:<18} {'enabled' if enabled else ''}")
     return added, updated, notes
 
 
