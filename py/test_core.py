@@ -502,7 +502,7 @@ class LeantimeRenderTests(unittest.TestCase):
             {"id": 3, "type": "task", "status": 0, "tags": "T", "headline": "Old", "dependingTicketId": 1},
         ]
         self.assertEqual(render_today(tasks),
-                         "# T\n- [ ] Build\n- [!] Test \u2190 waiting on Build\n- [x] Old\n")
+                         "# No milestone\n- [ ] Build\n- [!] Test \u2190 waiting on Build\n- [x] Old\n")
         tasks[0]["status"] = 0  # prerequisite finished: no longer blocked
         self.assertIn("- [ ] Test\n", render_today(tasks))
 
@@ -529,14 +529,17 @@ class LeantimeRenderTests(unittest.TestCase):
         text = "- [ ] a\n- [~] b\n- [!] c\n- [x] d\n"
         self.assertEqual([k for k, _ in parse_md(text)], ["todo", "wip", "blocked", "done"])
 
-    def test_today_groups_and_status(self):
-        ts = [
-            {"id": 2, "type": "task", "status": 0, "tags": "B", "headline": "two"},
-            {"id": 1, "type": "task", "status": 3, "tags": "", "headline": "one"},
-            {"id": 3, "type": "task", "status": -1, "tags": "B", "headline": "archived"},
-            {"id": 4, "type": "milestone", "status": 3, "tags": "", "headline": "ms"},
-        ]
-        self.assertEqual(render_today(ts), "# Other\n- [ ] one\n\n# B\n- [x] two\n")
+    def test_today_groups_by_milestone(self):
+        ms = lambda i, start: {"id": i, "type": "milestone", "status": 3, "headline": f"M{i}",
+                               "editFrom": start, "editTo": start}
+        task = lambda i, m, s=3, **kw: dict({"id": i, "type": "task", "status": s, "milestoneid": m,
+                                            "tags": "ignored", "headline": f"t{i}"}, **kw)
+        everything = [ms(10, "2026-10-05"), ms(11, "2026-09-28"),  # 11 starts first
+                      task(1, 10), task(2, 0), task(3, 11, 0), task(4, 10, -1), task(5, 99)]
+        text = render_today([t for t in everything if t["type"] == "task"], everything=everything)
+        self.assertEqual(text, "# M11\n- [x] t3\n\n# M10\n- [ ] t1\n\n# No milestone\n- [ ] t2\n- [ ] t5\n")
+        # without milestone info every task lands under "No milestone"
+        self.assertEqual(render_today([task(1, 10)]), "# No milestone\n- [ ] t1\n")
 
 
 class LayoutTests(unittest.TestCase):

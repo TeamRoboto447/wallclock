@@ -354,7 +354,7 @@ def _draw_dependencies(surf, placed, row_h):
 
 
 def today_pages(items, cap):
-    """Split md items into pages of at most cap task rows, one tag per page."""
+    """Split md items into pages of at most cap task rows, one heading (milestone) per page."""
     groups = []
     for kind, text in items:
         if kind == "h" or not groups:

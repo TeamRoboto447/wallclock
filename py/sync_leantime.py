@@ -141,23 +141,46 @@ def render_plan(milestones, today=None):
     return "\n\n".join(lines) + "\n" if lines else ""
 
 
+NO_MILESTONE = "No milestone"
+
+
 def render_today(tasks, keep=None, everything=None):
-    """today.md text. `everything` is every ticket (milestones too), used to
-    resolve 'Depends On': a task waiting on an unfinished ticket shows as blocked."""
+    """today.md text, tasks grouped under their milestone (in milestone start
+    order, tasks without one last). `everything` is every ticket, milestones
+    too, used to find milestone names and resolve 'Depends On': a task waiting
+    on an unfinished ticket shows as blocked."""
     by_id = {t["id"]: t for t in (everything if everything is not None else tasks)}
-    groups = {}
+
+    def milestone_of(t):
+        m = by_id.get(int(t.get("milestoneid") or 0))
+        return m if m is not None and m.get("type") == "milestone" else None
+
+    def order(m):
+        if m is None:
+            return (1, datetime.date.max, 0)
+        try:
+            return (0, _date(m["editFrom"]), m["id"])
+        except (KeyError, TypeError, ValueError):
+            return (0, datetime.date.max, m["id"])
+
+    groups = {}  # milestone (or None) -> lines, keyed by id for hashing
     for t in sorted(tasks, key=lambda t: t["id"]):
         if t.get("type") != "task" or t.get("status") == ARCHIVED:
             continue
         if keep and not keep(t):
             continue
-        tag = (t.get("tags") or "").split(",")[0].strip() or "Other"
+        ms = milestone_of(t)
         mark, text = MARKER.get(t.get("status"), " "), t["headline"].strip()
         dep = waiting_on(t, by_id) if unfinished(t) else None
         if dep:
             mark, text = "!", f"{text} \u2190 waiting on {dep['headline'].strip()}"
-        groups.setdefault(tag, []).append(f"- [{mark}] {text}")
-    return "\n\n".join(f"# {tag}\n" + "\n".join(items) for tag, items in groups.items()) + "\n" if groups else ""
+        entry = groups.setdefault(ms["id"] if ms else 0, (ms, []))
+        entry[1].append(f"- [{mark}] {text}")
+    ordered = sorted(groups.values(), key=lambda g: order(g[0]))
+    return "\n\n".join(
+        f"# {ms['headline'].strip() if ms else NO_MILESTONE}\n" + "\n".join(lines)
+        for ms, lines in ordered
+    ) + "\n" if ordered else ""
 
 
 def is_priority(t, blockers=()):
