@@ -1,0 +1,13 @@
+[Unit]
+Description=tvgui network watchdog (reconnect and log why)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+WorkingDirectory=/var/lib/tvgui
+ExecStart=/usr/bin/python3 -u /usr/local/share/tvgui/netwatch.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

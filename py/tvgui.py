@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime
+import math
 import os
 import queue
 import subprocess
@@ -12,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from attendance import Store, year_start
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
+from netstatus import probe as net_probe
 from nfc import EnrollSlot, split_here, start as nfc_start
 from plan import current_week, load_md, load_plan, plan_path, priority_path, today_path
 from tts import backfill, play_greet, say, say_ready
@@ -35,6 +37,7 @@ GRID = (0x2A, 0x2A, 0x2A)
 STATUS_BG = (0x3A, 0x0A, 0x0A)
 HERE_REFRESH_SECS = 30
 CYCLE_SECS = 10
+NET_POLL_SECS = 10
 GANTT_HEAD_H = 48
 GANTT_ROW_H = 32
 GANTT_PAD = 12
@@ -286,22 +289,27 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
     if grid.width < 40 or grid.height < 24:
         return
     col_w = grid.width / weeks
+    step = max(1, math.ceil(100 / col_w))  # thin the week labels when weeks are narrow
+    this_year = datetime.datetime.fromtimestamp(now).year
     for i in range(weeks):
         x = int(grid.x + i * col_w)
         pygame.draw.line(surf, BORDER, (x, grid.y), (x, grid.bottom - 1), 1)
-        label = f"W{i + 1}"
-        if plan.get("start"):
+        if plan.get("start") and i % step == 0:
             d = plan["start"] + datetime.timedelta(days=7 * i)
-            label += f" {d.month}/{d.day}"
-        tick = font_sm.render(label, True, MUTED)
-        surf.blit(tick, (x + 4, rect.y + 20))
+            label = f"{d.month}/{d.day}" + (f"/{d.year % 100}" if d.year != this_year else "")
+            if col_w * step >= 150:
+                label = f"W{i + 1} {label}"
+            surf.blit(font_sm.render(label, True, MUTED), (x + 4, rect.y + 20))
+        elif not plan.get("start") and i % step == 0:
+            surf.blit(font_sm.render(f"W{i + 1}", True, MUTED), (x + 4, rect.y + 20))
     pygame.draw.line(surf, BORDER, (grid.right - 1, grid.y), (grid.right - 1, grid.bottom - 1), 1)
     cur = current_week(plan.get("start"), weeks, now)
     if cur:
         cx = int(grid.x + (cur - 0.5) * col_w)
         pygame.draw.line(surf, RED, (cx, grid.y), (cx, grid.bottom - 1), 2)
     y = grid.y
-    for status, name, lo, hi in bars:
+    placed = {}  # milestone id -> (row y, left x, right x, status)
+    for status, name, lo, hi, d0, d1, bid, bdep in bars:
         if y + row_h > grid.bottom:
             break
         if font_sm.size(name)[0] > label_w - 12:
@@ -311,11 +319,38 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
         label = font_sm.render(name, True, INK)
         surf.blit(label, (rect.x + 16, y + 4))
         if lo and hi:
-            x0 = int(grid.x + (lo - 1) * col_w) + 3
-            x1 = int(grid.x + hi * col_w) - 3
+            if d0 is not None:  # day-accurate span
+                x0 = int(grid.x + d0 * col_w) + 2
+                x1 = int(grid.x + d1 * col_w) - 2
+            else:
+                x0 = int(grid.x + (lo - 1) * col_w) + 3
+                x1 = int(grid.x + hi * col_w) - 3
             bar = pygame.Rect(x0, y + 6, max(4, x1 - x0), row_h - 12)
             pygame.draw.rect(surf, STATUS_COLOR.get(status, BLUE), bar)
+            if bid is not None:
+                placed[bid] = (y, bar.left, bar.right, status, bdep)
         y += row_h
+    _draw_dependencies(surf, placed, row_h)
+
+
+def _draw_dependencies(surf, placed, row_h):
+    """An arrow from the end of each prerequisite bar to the start of the bar
+    that depends on it; red, with an outlined bar, if the dependent starts
+    before its prerequisite ends."""
+    import pygame
+
+    for bid, (y, left, right, status, dep) in placed.items():
+        if dep not in placed:
+            continue
+        py, _, pright, pstatus, _ = placed[dep]
+        conflict = left <= pright
+        color = LTRED if conflict else BEIGE
+        my, py_mid = y + row_h // 2, py + row_h // 2
+        turn = pright + 8
+        pygame.draw.lines(surf, color, False, [(pright, py_mid), (turn, py_mid), (turn, my), (left - 5, my)], 2)
+        pygame.draw.polygon(surf, color, [(left - 1, my), (left - 8, my - 5), (left - 8, my + 5)])
+        if left <= pright:  # starts before its prerequisite ends
+            pygame.draw.rect(surf, LTRED, pygame.Rect(left, y + 6, max(4, right - left), row_h - 12), 3)
 
 
 def today_pages(items, cap):
@@ -344,6 +379,24 @@ def plan_height(plan, cap):
     return min(cap, need)
 
 
+NET_COLOR = {"ok": GREEN, "limited": YELLOW, "down": LTRED}
+
+
+def _draw_wifi(surf, cx, base_y, state, bars):
+    """Wifi glyph: a dot and three arcs, lit by signal bars, colored by state."""
+    import pygame
+
+    color = NET_COLOR.get(state, MUTED)
+    lit = bars if state in ("ok", "limited") else 0
+    pygame.draw.circle(surf, color if state != "down" else MUTED, (cx, base_y), 4)
+    for i, r in enumerate((13, 23, 33)):
+        c = color if i < max(lit, 1 if state in ("ok", "limited") else 0) else BORDER
+        rect = pygame.Rect(cx - r, base_y - r, 2 * r, 2 * r)
+        pygame.draw.arc(surf, c, rect, math.radians(48), math.radians(132), 4)
+    if state == "down":
+        pygame.draw.line(surf, LTRED, (cx - 24, base_y - 34), (cx + 24, base_y + 6), 4)
+
+
 def compose(
     size,
     font_big,
@@ -357,6 +410,7 @@ def compose(
     plan,
     today_items,
     priority_items,
+    net=("unknown", 0),
 ):
     import pygame
 
@@ -401,7 +455,9 @@ def compose(
     dt = datetime.datetime.fromtimestamp(now)
     clock = font_big.render(dt.strftime("%I:%M %p").lstrip("0"), True, INK)
     date = font_sm.render(dt.strftime("%a %b ") + str(dt.day), True, BEIGE)
-    surf.blit(clock, (st.right - 18 - clock.get_width(), st.y + 30))
+    clock_x = st.right - 18 - clock.get_width()
+    surf.blit(clock, (clock_x, st.y + 30))
+    _draw_wifi(surf, clock_x - 54, st.y + 30 + clock.get_height() - 8, net[0], net[1])
     surf.blit(date, (st.right - 18 - date.get_width(), st.y + 30 + clock.get_height() + 4))
     return surf
 
@@ -422,6 +478,19 @@ def present(renderer, surf, tex=None):
 def kiosk():
     import pygame
 
+    net = {"state": "unknown", "bars": 0}
+
+    def _net_loop():
+        while True:
+            try:
+                p = net_probe()
+                net["state"], net["bars"] = p["state"], p["bars"]
+            except Exception as e:
+                print(f"net probe: {e}", flush=True)
+                net["state"], net["bars"] = "down", 0
+            time.sleep(NET_POLL_SECS)
+
+    threading.Thread(target=_net_loop, daemon=True).start()
     store = Store(db_path())
     who = store.who()
     mentors, students, parents = split_here(who)
@@ -461,6 +530,7 @@ def kiosk():
         plan,
         today_items,
         priority_items,
+        (net["state"], net["bars"]),
     )
     tex = present(renderer, surf)
     save_ui(surf, state)
@@ -473,6 +543,8 @@ def kiosk():
         plan_mtime,
         today_mtime,
         priority_mtime,
+        net["state"],
+        net["bars"],
     )
     last_refresh = now
     last_active = time.monotonic()
@@ -561,6 +633,8 @@ def kiosk():
             plan_mtime,
             today_mtime,
             priority_mtime,
+            net["state"],
+            net["bars"],
         )
         try:
             if blanked:
@@ -587,6 +661,7 @@ def kiosk():
                     plan,
                     today_items,
                     priority_items,
+                    (net["state"], net["bars"]),
                 )
                 tex = present(renderer, surf)
                 save_ui(surf, state)

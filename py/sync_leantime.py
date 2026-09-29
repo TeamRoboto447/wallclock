@@ -10,13 +10,16 @@ end date is left out of plan.md.
 With LEANTIME_ROLL_FORWARD=1 an unfinished milestone (anything but Done,
 so blocked too) whose end date is before today is moved, keeping its length,
 to end this week's Sunday, written back to Leantime (needs an Editor key).
+Dependencies ('Depends On'): a task waiting on an unfinished ticket shows as
+blocked; a task others wait on counts as priority; plan.md lines carry
+{id<depends-on} so the display can draw arrows; a moved milestone pushes its
+dependents back so they start after it ends.
 Status markers: [ ] new, [~] in progress/waiting, [!] blocked, [x] done.
-Milestones become plan.md entries (7+ day span: "# Week of M/D - name",
-shorter: "M/D - M/D --- name"). Tasks become today.md items grouped under their
+Milestones become plan.md entries "M/D/YYYY - M/D/YYYY --- name" (start and end). Tasks become today.md items grouped under their
 first tag. Files are replaced atomically; on any error the old files stay.
 
 Env: LEANTIME_API_KEY (required), LEANTIME_URL (default tasks.teamroboto.org),
-LEANTIME_PROJECT (default 7), LEANTIME_TZ (default America/Los_Angeles).
+LEANTIME_PROJECT (default 7).
 """
 import datetime
 import http.client
@@ -25,7 +28,6 @@ import os
 import sys
 import time
 import urllib.parse
-import zoneinfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,7 +36,6 @@ from plan import plan_path, priority_path, today_path
 DEFAULT_URL = "https://tasks.teamroboto.org"
 DONE = 0
 ARCHIVED = -1
-WEEK_DAYS = 6
 MARKER = {0: "x", 4: "~", 2: "~", 1: "!"}  # anything else (New) is " "
 
 
@@ -70,21 +71,55 @@ class Client:
         return data["result"]
 
 
-# Leantime returns UTC; its UI writes local midnight as UTC, so the calendar
-# date a person picked only comes back after converting to Leantime's timezone.
-TZ = zoneinfo.ZoneInfo(os.environ.get("LEANTIME_TZ", "America/Los_Angeles"))
-
-
 def _date(s):
+    """The calendar day a person picked in Leantime. It stores UTC, and its UI
+    saves a start as local midnight and an end as 23:59:59, in whatever
+    timezone the editor uses (07:00 UTC for Los Angeles, 04:00 for Eastern), so
+    the day is read from the value itself and not from a fixed timezone."""
     s = str(s)
     if len(s) <= 10:
         return datetime.date.fromisoformat(s)
-    utc = datetime.datetime.fromisoformat(s).replace(tzinfo=datetime.timezone.utc)
-    return utc.astimezone(TZ).date()
+    dt = datetime.datetime.fromisoformat(s)
+    if dt.hour < 12 and (dt.minute, dt.second) == (59, 59):  # end of the picked day
+        return (dt + datetime.timedelta(seconds=1)).date() - datetime.timedelta(days=1)
+    return dt.date()
+
+
+def dep_id(t):
+    """id of the ticket this one 'Depends On', or 0. Leantime keeps that in
+    `milestoneid` for a milestone (its UI field) and in `dependingTicketId` for
+    a task, where `milestoneid` is instead the milestone the task belongs to."""
+    fields = ("milestoneid", "dependingTicketId") if t.get("type") == "milestone" else ("dependingTicketId",)
+    for f in fields:
+        try:
+            if int(t.get(f) or 0):
+                return int(t[f])
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+def unfinished(t):
+    return t.get("status") not in (DONE, ARCHIVED)
+
+
+def waiting_on(t, by_id):
+    """The unfinished ticket this one depends on, if any."""
+    dep = by_id.get(dep_id(t))
+    return dep if dep is not None and unfinished(dep) else None
+
+
+def blocking_ids(tickets):
+    """Ids of unfinished tickets that some other unfinished ticket depends on."""
+    by_id = {t["id"]: t for t in tickets}
+    return {dep["id"] for t in tickets if unfinished(t) and (dep := waiting_on(t, by_id))}
 
 
 def render_plan(milestones, today=None):
+    """plan.md text. A milestone waiting on an unfinished milestone it depends
+    on is shown as blocked whatever its own status says."""
     today = today or datetime.date.today()
+    by_id = {m["id"]: m for m in milestones if "id" in m}
     rows = []
     for m in milestones:
         try:
@@ -95,18 +130,21 @@ def render_plan(milestones, today=None):
             continue
         if m.get("status") == 0 and b < today:  # done and past its deadline
             continue
-        rows.append((a, b, m["headline"].strip(), MARKER.get(m.get("status"), " ")))
+        mid = m.get("id", 0)
+        tag = f"{{{mid}<{dep_id(m)}}}" if dep_id(m) else f"{{{mid}}}"
+        mark = "!" if unfinished(m) and waiting_on(m, by_id) else MARKER.get(m.get("status"), " ")
+        rows.append((a, b, m["headline"].strip(), mark, tag))
     rows.sort(key=lambda r: (r[0], r[1]))
     lines = []
-    for a, b, name, mark in rows:
-        if (b - a).days >= WEEK_DAYS:
-            lines.append(f"# [{mark}] Week of {a.month}/{a.day} - {name}")
-        else:
-            lines.append(f"[{mark}] {a.month}/{a.day} - {b.month}/{b.day} --- {name}")
+    for a, b, name, mark, tag in rows:
+        lines.append(f"[{mark}] {a.month}/{a.day}/{a.year} - {b.month}/{b.day}/{b.year} --- {name} {tag}")
     return "\n\n".join(lines) + "\n" if lines else ""
 
 
-def render_today(tasks, keep=None):
+def render_today(tasks, keep=None, everything=None):
+    """today.md text. `everything` is every ticket (milestones too), used to
+    resolve 'Depends On': a task waiting on an unfinished ticket shows as blocked."""
+    by_id = {t["id"]: t for t in (everything if everything is not None else tasks)}
     groups = {}
     for t in sorted(tasks, key=lambda t: t["id"]):
         if t.get("type") != "task" or t.get("status") == ARCHIVED:
@@ -114,15 +152,22 @@ def render_today(tasks, keep=None):
         if keep and not keep(t):
             continue
         tag = (t.get("tags") or "").split(",")[0].strip() or "Other"
-        mark = MARKER.get(t.get("status"), " ")
-        groups.setdefault(tag, []).append(f"- [{mark}] {t['headline'].strip()}")
+        mark, text = MARKER.get(t.get("status"), " "), t["headline"].strip()
+        dep = waiting_on(t, by_id) if unfinished(t) else None
+        if dep:
+            mark, text = "!", f"{text} \u2190 waiting on {dep['headline'].strip()}"
+        groups.setdefault(tag, []).append(f"- [{mark}] {text}")
     return "\n\n".join(f"# {tag}\n" + "\n".join(items) for tag, items in groups.items()) + "\n" if groups else ""
 
 
-def is_priority(t):
-    """High or Critical (Leantime 1-2) and not finished."""
+def is_priority(t, blockers=()):
+    """Unfinished and either High/Critical (Leantime 1-2) or holding others up."""
+    if not unfinished(t):
+        return False
+    if t.get("id") in blockers:
+        return True
     try:
-        return int(t.get("priority")) <= 2 and t.get("status") != 0
+        return int(t.get("priority")) <= 2
     except (TypeError, ValueError):
         return False
 
@@ -154,33 +199,57 @@ def overdue(m, today):
         return False
 
 
-def roll_values(ticket, today):
-    """Full update payload with the milestone shifted so it ends this Sunday,
-    keeping its length. Leantime clears any field left out of an update and
-    shifts datetimes on every write, so everything is resent and the dates
-    go back as date-only."""
+def roll_values(ticket, start, end):
+    """Full update payload with the milestone moved to start..end. Leantime
+    clears any field left out of an update and shifts datetimes on every write,
+    so everything is resent and the dates go back as date-only."""
     v = {k: ticket.get(k) for k in TICKET_KEYS}
-    span = _date(ticket["editTo"]) - _date(ticket["editFrom"])
-    end = week_deadline(today)
-    v["editFrom"], v["editTo"] = (end - span).isoformat(), end.isoformat()
+    v["editFrom"], v["editTo"] = start.isoformat(), end.isoformat()
     v["dateToFinish"] = "" if v["dateToFinish"] in (ZERO, None) else str(v["dateToFinish"])[:10]
     v["timeFrom"], v["timeTo"] = v["timeFrom"] or "", v["timeTo"] or ""
     return v
+
+
+def plan_moves(milestones, today):
+    """{id: (start, end)} of milestones to move: each overdue one ends this
+    Sunday (keeping its length), and anything that depends on a moved milestone
+    is pushed to start the day after its prerequisite ends, keeping its length,
+    and so on down the chain."""
+    ms = [m for m in milestones if m.get("type") == "milestone"]
+    span = lambda m: _date(m["editTo"]) - _date(m["editFrom"])
+    sunday = week_deadline(today)
+    moves = {m["id"]: (sunday - span(m), sunday) for m in ms if overdue(m, today)}
+    queue = list(moves)
+    for _ in range(200):  # also stops a dependency cycle
+        if not queue:
+            break
+        rid = queue.pop(0)
+        end = moves[rid][1]
+        for d in ms:
+            if dep_id(d) != rid or d["id"] == rid or not unfinished(d):
+                continue
+            start, stop = moves.get(d["id"]) or (_date(d["editFrom"]), _date(d["editTo"]))
+            if start <= end:
+                new = end + datetime.timedelta(days=1)
+                moves[d["id"]] = (new, new + (stop - start))
+                queue.append(d["id"])
+    return moves
 
 
 def roll_forward(client, milestones, today):
     global _roll_retry_at
     if time.time() < _roll_retry_at:
         return 0
+    by_id = {m["id"]: m for m in milestones}
     moved = 0
-    for m in [m for m in milestones if overdue(m, today)][:ROLL_BATCH]:
+    for mid, (start, end) in list(plan_moves(milestones, today).items())[:ROLL_BATCH]:
         try:
-            full = client.call("tickets.getTicket", {"id": m["id"]})
-            values = roll_values(full, today)
-            client.call("tickets.updateTicket", {"values": values})
+            full = client.call("tickets.getTicket", {"id": mid})
+            client.call("tickets.updateTicket", {"values": roll_values(full, start, end)})
             moved += 1
-            print(f"rolled milestone {m['id']} '{m['headline']}': ends "
-                  f"{str(m['editTo'])[:10]} -> {values['editTo']}", flush=True)
+            old = by_id[mid]
+            print(f"moved milestone {mid} '{old['headline']}': "
+                  f"{_date(old['editFrom'])}..{_date(old['editTo'])} -> {start}..{end}", flush=True)
         except Exception as e:
             print(f"roll forward failed ({e}); pausing 10 min", flush=True)
             _roll_retry_at = time.time() + ROLL_BACKOFF_SECS
@@ -211,12 +280,14 @@ def sync_once(client, crit, roll=False):
     tasks = client.call("tickets.getAll", crit)
     if roll and roll_forward(client, milestones, datetime.date.today()):
         milestones = client.call("tickets.getAllMilestones", crit)
+    blockers = blocking_ids(tasks)
     changed = [
         name
         for name, path, text in (
             ("plan", plan_path(), render_plan(milestones)),
-            ("today", today_path(), render_today(tasks)),
-            ("priority", priority_path(), render_today(tasks, is_priority)),
+            ("today", today_path(), render_today(tasks, everything=tasks)),
+            ("priority", priority_path(),
+             render_today(tasks, lambda t: is_priority(t, blockers), tasks)),
         )
         if write_if_changed(path, text)
     ]

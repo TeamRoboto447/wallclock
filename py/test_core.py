@@ -20,10 +20,13 @@ from tts import (
 import ndef
 from sync_authentik import convert, display_names
 from sync_leantime import (
-    is_priority, overdue, render_plan, render_today, roll_values, week_deadline,
+    blocking_ids, is_priority, overdue, plan_moves, render_plan, render_today,
+    roll_values, week_deadline,
 )
 from tvgui import fmt_total, plan_height, today_pages
 from nfc import split_here
+from netstatus import bars, classify
+from netwatch import action_for, decode_throttled
 
 
 class MemberTests(unittest.TestCase):
@@ -196,9 +199,9 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(
             g["bars"],
             [
-                ("done", "Gear box 5:1", 1, 2),
-                ("new", "Battery Holder", 2, 4),
-                ("new", "Quest Mount", 3, 3),
+                ("done", "Gear box 5:1", 1, 2, None, None, None, None),
+                ("new", "Battery Holder", 2, 4, None, None, None, None),
+                ("new", "Quest Mount", 3, 3, None, None, None, None),
             ],
         )
 
@@ -319,11 +322,11 @@ class SyncTests(unittest.TestCase):
 class LeantimeRenderTests(unittest.TestCase):
     def test_plan(self):
         ms = [
-            {"headline": "Event", "editFrom": "2026-10-23 19:00:00", "editTo": "2026-10-24 19:00:00"},
-            {"headline": "Week A", "editFrom": "2026-09-28 19:00:00", "editTo": "2026-10-04 19:00:00"},
+            {"id": 1, "headline": "Event", "editFrom": "2026-10-23 19:00:00", "editTo": "2026-10-24 19:00:00"},
+            {"id": 2, "headline": "Week A", "editFrom": "2026-09-28 19:00:00", "editTo": "2026-10-04 19:00:00"},
         ]
         self.assertEqual(
-            render_plan(ms), "# [ ] Week of 9/28 - Week A\n\n[ ] 10/23 - 10/24 --- Event\n"
+            render_plan(ms), "[ ] 9/28/2026 - 10/4/2026 --- Week A {2}\n\n[ ] 10/23/2026 - 10/24/2026 --- Event {1}\n"
         )
 
     def test_plan_status_roundtrip(self):
@@ -352,10 +355,34 @@ class LeantimeRenderTests(unittest.TestCase):
         event = {"headline": "Ev", "status": 1,
                  "editFrom": "2026-10-23 07:00:00", "editTo": "2026-10-25 06:59:59"}
         self.assertEqual(render_plan([done], today=datetime.date(2026, 9, 27)),
-                         "# [x] Week of 9/21 - Old\n")
+                         "[x] 9/21/2026 - 9/27/2026 --- Old {0}\n")
         self.assertEqual(render_plan([done], today=datetime.date(2026, 9, 28)), "")
         self.assertEqual(render_plan([event], today=datetime.date(2026, 10, 1)),
-                         "[!] 10/23 - 10/24 --- Ev\n")
+                         "[!] 10/23/2026 - 10/24/2026 --- Ev {0}\n")
+
+    def test_multi_week_milestone_keeps_its_end(self):
+        ms = [{"headline": "Long", "editFrom": "2026-09-28", "editTo": "2026-10-18", "status": 3},
+              {"headline": "One", "editFrom": "2026-09-28", "editTo": "2026-10-04", "status": 3}]
+        g = parse_plan(render_plan(ms, today=datetime.date(2026, 9, 28)), today=datetime.date(2026, 9, 28))
+        self.assertEqual([(b[1], b[2], b[3]) for b in g["bars"]], [("One", 1, 1), ("Long", 1, 3)])
+
+    def test_dates_read_the_same_for_any_editor_timezone(self):
+        for start, end in (("2026-10-05 07:00:00", "2026-10-13 06:59:59"),   # Los Angeles
+                           ("2026-10-05 04:00:00", "2026-10-13 03:59:59"),   # Eastern
+                           ("2026-10-05", "2026-10-12"),
+                           ("2026-10-05 19:00:00", "2026-10-12 19:00:00")):  # written by the API
+            ms = [{"headline": "M", "editFrom": start, "editTo": end, "status": 3}]
+            self.assertEqual(render_plan(ms, today=datetime.date(2026, 10, 1)),
+                             "[ ] 10/5/2026 - 10/12/2026 --- M {0}\n")
+
+    def test_bar_ends_on_its_end_day_not_the_week_end(self):
+        ms = [{"headline": "A", "editFrom": "2026-09-28", "editTo": "2026-10-04", "status": 3},
+              {"headline": "Tune", "editFrom": "2026-10-05", "editTo": "2026-10-12", "status": 3}]
+        g = parse_plan(render_plan(ms, today=datetime.date(2026, 9, 28)), today=datetime.date(2026, 9, 28))
+        a, tune = g["bars"]
+        self.assertEqual((a[4], a[5]), (0.0, 1.0))           # a full week
+        self.assertEqual(tune[4], 1.0)                        # starts at week 2
+        self.assertAlmostEqual(tune[5], 15 / 7)               # ends 1 day into week 3
 
     def test_priority_filter(self):
         mk = lambda p, s: {"priority": p, "status": s}
@@ -384,16 +411,119 @@ class LeantimeRenderTests(unittest.TestCase):
         self.assertFalse(overdue({"type": "milestone", "status": 3,
                                   "editFrom": "0000-00-00 00:00:00", "editTo": "0000-00-00 00:00:00"}, today))
 
-    def test_roll_values_shifts_and_keeps_fields(self):
+    def test_roll_values_moves_dates_and_keeps_fields(self):
         m = {"id": 5, "headline": "h", "type": "milestone", "status": 3, "tags": "#1f77b4",
              "dateToFinish": "0000-00-00 00:00:00", "editFrom": "2026-09-14 19:00:00",
-             "editTo": "2026-09-20 19:00:00", "timeFrom": None, "description": "d"}
-        v = roll_values(m, datetime.date(2026, 9, 30))  # Wed; week ends Sun 10/4
+             "editTo": "2026-09-20 19:00:00", "timeFrom": None, "description": "d",
+             "dependingTicketId": 4}
+        v = roll_values(m, datetime.date(2026, 9, 28), datetime.date(2026, 10, 4))
         self.assertEqual((v["editFrom"], v["editTo"]), ("2026-09-28", "2026-10-04"))
-        self.assertEqual((v["tags"], v["description"], v["dateToFinish"], v["timeFrom"]), ("#1f77b4", "d", "", ""))
-        ev = dict(m, editFrom="2026-09-14 19:00:00", editTo="2026-09-15 19:00:00")  # 1-day event
-        v = roll_values(ev, datetime.date(2026, 9, 30))
-        self.assertEqual((v["editFrom"], v["editTo"]), ("2026-10-03", "2026-10-04"))
+        self.assertEqual((v["tags"], v["description"], v["dateToFinish"], v["timeFrom"], v["dependingTicketId"]),
+                         ("#1f77b4", "d", "", "", 4))
+
+    def test_overdue_milestone_rolls_to_sunday_keeping_length(self):
+        today = datetime.date(2026, 9, 30)  # Wed; the week ends Sun 10/4
+        mk = lambda i, a, b, **kw: dict({"id": i, "type": "milestone", "status": 3,
+                                        "editFrom": a, "editTo": b}, **kw)
+        moves = plan_moves([mk(1, "2026-09-14", "2026-09-20"), mk(2, "2026-09-14", "2026-09-15")], today)
+        self.assertEqual(moves[1], (datetime.date(2026, 9, 28), datetime.date(2026, 10, 4)))
+        self.assertEqual(moves[2], (datetime.date(2026, 10, 3), datetime.date(2026, 10, 4)))
+
+    def test_cascade_pushes_dependents_after_their_prerequisite(self):
+        today = datetime.date(2026, 9, 30)
+        mk = lambda i, a, b, dep=0, **kw: dict({"id": i, "type": "milestone", "status": 3,
+                                               "editFrom": a, "editTo": b, "dependingTicketId": dep}, **kw)
+        ms = [
+            mk(1, "2026-09-14", "2026-09-20"),                 # overdue prerequisite -> ends 10/4
+            mk(2, "2026-09-21", "2026-09-27", dep=1),          # overdue dependent (7 days) -> 10/5..10/11
+            mk(3, "2026-10-05", "2026-10-11", dep=2),          # not overdue, but must follow 2 -> 10/12..10/18
+            mk(4, "2026-10-25", "2026-10-31", dep=3),          # already after 3 -> unchanged
+            mk(5, "2026-09-01", "2026-09-05", dep=1, status=0),  # done -> never moved
+        ]
+        moves = plan_moves(ms, today)
+        d = datetime.date
+        self.assertEqual(moves[1], (d(2026, 9, 28), d(2026, 10, 4)))
+        self.assertEqual(moves[2], (d(2026, 10, 5), d(2026, 10, 11)))
+        self.assertEqual(moves[3], (d(2026, 10, 12), d(2026, 10, 18)))
+        self.assertNotIn(4, moves)
+        self.assertNotIn(5, moves)
+
+    def test_milestone_dependency_is_read_from_milestoneid(self):
+        from sync_leantime import dep_id
+        ms = {"type": "milestone", "milestoneid": 65, "dependingTicketId": 0}
+        self.assertEqual(dep_id(ms), 65)
+        self.assertEqual(dep_id({"type": "milestone", "milestoneid": None, "dependingTicketId": 7}), 7)
+        # for a task, milestoneid is its milestone, not a dependency
+        self.assertEqual(dep_id({"type": "task", "milestoneid": 65, "dependingTicketId": 0}), 0)
+        self.assertEqual(dep_id({"type": "task", "milestoneid": 65, "dependingTicketId": 9}), 9)
+        ms_list = [{"id": 1, "type": "milestone", "status": 3, "editFrom": "2026-09-14", "editTo": "2026-09-20", "milestoneid": None},
+                   {"id": 2, "type": "milestone", "status": 3, "editFrom": "2026-09-21", "editTo": "2026-09-27", "milestoneid": 1}]
+        moves = plan_moves(ms_list, datetime.date(2026, 9, 30))
+        self.assertEqual(moves[2][0], datetime.date(2026, 10, 5))
+
+    def test_milestone_waiting_on_unfinished_milestone_shows_blocked(self):
+        mk = lambda i, status, dep=None: {"id": i, "headline": f"M{i}", "status": status,
+                                          "type": "milestone", "milestoneid": dep,
+                                          "editFrom": "2026-10-05", "editTo": "2026-10-11"}
+        today = datetime.date(2026, 10, 1)
+        # M2 is New but waits on M1 (in progress): shown blocked; M1 itself is not
+        text = render_plan([mk(1, 4), mk(2, 3, 1)], today=today)
+        self.assertIn("[~] 10/5/2026 - 10/11/2026 --- M1", text)
+        self.assertIn("[!] 10/5/2026 - 10/11/2026 --- M2 {2<1}", text)
+        # once M1 is done, M2 is no longer blocked; a done milestone is never blocked
+        text = render_plan([mk(1, 0), mk(2, 3, 1), mk(3, 0, 2)], today=today)
+        self.assertIn("[ ] 10/5/2026 - 10/11/2026 --- M2", text)
+        self.assertIn("[x] 10/5/2026 - 10/11/2026 --- M3", text)
+        # an explicit Blocked status still shows blocked with no dependency
+        self.assertIn("[!] 10/5/2026 - 10/11/2026 --- M4", render_plan([mk(4, 1)], today=today))
+
+    def test_plan_keeps_the_year_so_next_years_milestones_sort_last(self):
+        ms = [{"id": 1, "headline": "Kick-Off", "editFrom": "2027-01-01 05:00:00", "editTo": "2027-01-07 04:59:59", "status": 3},
+              {"id": 2, "headline": "Now", "editFrom": "2026-10-05 04:00:00", "editTo": "2026-10-12 03:59:59", "status": 3}]
+        text = render_plan(ms, today=datetime.date(2026, 10, 1))
+        self.assertIn("--- Kick-Off {1}", text)
+        g = parse_plan(text, today=datetime.date(2026, 10, 1))
+        self.assertEqual(g["start"], datetime.date(2026, 10, 5))
+        (now, kick) = g["bars"]
+        self.assertEqual((now[1], now[2]), ("Now", 1))
+        self.assertEqual((kick[1], kick[2], kick[3]), ("Kick-Off", 13, 14))  # Fri 1/1 .. Wed 1/6 crosses a week
+        self.assertEqual(g["weeks"], 14)
+
+    def test_dependency_cycle_terminates(self):
+        today = datetime.date(2026, 9, 30)
+        ms = [{"id": 1, "type": "milestone", "status": 3, "editFrom": "2026-09-14", "editTo": "2026-09-20", "dependingTicketId": 2},
+              {"id": 2, "type": "milestone", "status": 3, "editFrom": "2026-09-14", "editTo": "2026-09-20", "dependingTicketId": 1}]
+        self.assertEqual(set(plan_moves(ms, today)), {1, 2})
+
+    def test_task_waiting_on_dependency_shows_blocked(self):
+        tasks = [
+            {"id": 1, "type": "task", "status": 3, "tags": "T", "headline": "Build", "dependingTicketId": 0},
+            {"id": 2, "type": "task", "status": 3, "tags": "T", "headline": "Test", "dependingTicketId": 1},
+            {"id": 3, "type": "task", "status": 0, "tags": "T", "headline": "Old", "dependingTicketId": 1},
+        ]
+        self.assertEqual(render_today(tasks),
+                         "# T\n- [ ] Build\n- [!] Test \u2190 waiting on Build\n- [x] Old\n")
+        tasks[0]["status"] = 0  # prerequisite finished: no longer blocked
+        self.assertIn("- [ ] Test\n", render_today(tasks))
+
+    def test_blockers_count_as_priority(self):
+        tasks = [
+            {"id": 1, "type": "task", "status": 3, "priority": "3", "dependingTicketId": 0, "headline": "a"},
+            {"id": 2, "type": "task", "status": 3, "priority": "3", "dependingTicketId": 1, "headline": "b"},
+        ]
+        blockers = blocking_ids(tasks)
+        self.assertEqual(blockers, {1})
+        self.assertTrue(is_priority(tasks[0], blockers))
+        self.assertFalse(is_priority(tasks[1], blockers))
+
+    def test_plan_line_carries_id_and_dependency(self):
+        ms = [{"id": 66, "headline": "A", "editFrom": "2026-09-28", "editTo": "2026-10-04", "status": 3},
+              {"id": 67, "headline": "B", "editFrom": "2026-10-05", "editTo": "2026-10-11", "status": 3,
+               "dependingTicketId": 66}]
+        text = render_plan(ms, today=datetime.date(2026, 9, 28))
+        self.assertIn("--- B {67<66}", text)
+        g = parse_plan(text, today=datetime.date(2026, 9, 28))
+        self.assertEqual([(b[1], b[6], b[7]) for b in g["bars"]], [("A", 66, None), ("B", 67, 66)])
 
     def test_md_statuses(self):
         text = "- [ ] a\n- [~] b\n- [!] c\n- [x] d\n"
@@ -429,6 +559,27 @@ class LayoutTests(unittest.TestCase):
         bars = lambda n: {"bars": [("new", "x", 1, 1)] * n}
         self.assertEqual(plan_height(bars(2), 400), 48 + 2 * 32 + 12)
         self.assertEqual(plan_height(bars(50), 400), 400)
+
+
+class NetTests(unittest.TestCase):
+    def test_classify(self):
+        self.assertEqual(classify(True, True, True), "ok")
+        self.assertEqual(classify(True, True, False), "limited")
+        self.assertEqual(classify(True, False, False), "down")
+        self.assertEqual(classify(False, False, False), "down")
+
+    def test_bars(self):
+        self.assertEqual([bars(d) for d in (-45, -65, -75, None)], [3, 2, 1, 1])
+        self.assertEqual(bars(None, wired=True), 3)
+
+    def test_escalation_ladder(self):
+        got = [(n, action_for(n)) for n in range(1, 21) if action_for(n)]
+        self.assertEqual(got, [(2, "reconnect"), (4, "radio-cycle"), (8, "restart-nm"), (20, "reload-driver")])
+
+    def test_decode_throttled(self):
+        self.assertEqual(decode_throttled(0), ["ok"])
+        self.assertEqual(decode_throttled(0x50005),
+                         ["undervoltage now", "throttled now", "undervoltage since boot", "throttled since boot"])
 
 
 if __name__ == "__main__":

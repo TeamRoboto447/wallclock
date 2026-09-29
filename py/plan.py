@@ -7,6 +7,7 @@ WEEK_OF_RE = re.compile(
     r"^#+\s*Week of\s+(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\s*[-–—:]\s*(.+)$",
     re.I,
 )
+TAIL_RE = re.compile(r"\s*\{(\d+)(?:<(\d+))?\}\s*$")  # {id} or {id<depends-on-id}
 MARK_RE = re.compile(r"^(#*)\s*\[([ x~!])\]\s*")
 STATUS = {" ": "new", "~": "wip", "!": "blocked", "x": "done"}
 EVENT_RE = re.compile(
@@ -124,11 +125,17 @@ def parse_plan(text, today=None):
         if mm:
             status = STATUS[mm.group(2)]
             s = f"{mm.group(1)} {s[mm.end():]}".strip()
+        bid = bdep = None
+        tm = TAIL_RE.search(s)
+        if tm:
+            bid = int(tm.group(1))
+            bdep = int(tm.group(2)) if tm.group(2) else None
+            s = s[: tm.start()].rstrip()
         wm = WEEK_OF_RE.match(s)
         if wm:
             d = _mdy(wm.group(1), wm.group(2), wm.group(3), today.year)
             mon = _monday(d)
-            dated.append((status, wm.group(4).strip(), mon, mon + datetime.timedelta(days=6)))
+            dated.append((status, wm.group(4).strip(), mon, mon + datetime.timedelta(days=6), bid, bdep))
             continue
         em = EVENT_RE.match(s)
         if em:
@@ -136,7 +143,7 @@ def parse_plan(text, today=None):
             b = _mdy(em.group(4), em.group(5), em.group(6), today.year)
             if b < a:
                 a, b = b, a
-            dated.append((status, em.group(7).strip(), a, b))
+            dated.append((status, em.group(7).strip(), a, b, bid, bdep))
             continue
         if s.startswith("#") and not title:
             title = s.lstrip("#").strip()
@@ -159,8 +166,8 @@ def parse_plan(text, today=None):
         if name:
             numbered.append((status, name, lo, hi))
     if dated:
-        first = min(a for _, _, a, _ in dated)
-        last = max(b for _, _, _, b in dated)
+        first = min(d[2] for d in dated)
+        last = max(d[3] for d in dated)
         if start is None:
             start = _monday(first)
         span = (last - start).days // 7 + 1
@@ -169,14 +176,18 @@ def parse_plan(text, today=None):
     if weeks is None:
         weeks = 8
     bars = []
-    for status, name, a, b in dated:
+    for status, name, a, b, bid, bdep in dated:
         lo = (a - start).days // 7 + 1 if start else None
         hi = (b - start).days // 7 + 1 if start else None
+        d0 = d1 = None
         if lo is not None:
             lo = max(1, lo)
             hi = min(weeks, max(lo, hi))
-        bars.append((status, name, lo, hi))
-    bars.extend(numbered)
+            # exact span in weeks from the plan start, the end day included
+            d0 = min(float(weeks), max(0.0, (a - start).days / 7))
+            d1 = min(float(weeks), max(d0, ((b - start).days + 1) / 7))
+        bars.append((status, name, lo, hi, d0, d1, bid, bdep))
+    bars.extend((s, n, lo, hi, None, None, None, None) for s, n, lo, hi in numbered)
     return {
         "start": start,
         "weeks": weeks,
