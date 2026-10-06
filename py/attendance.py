@@ -1,4 +1,5 @@
 import datetime
+import os
 import sqlite3
 import time
 
@@ -160,6 +161,16 @@ class Store:
                 m.closed_secs = closed.get(username, 0)
                 out.append((m, ts))
         return out
+
+
+def db_path():
+    env = os.environ.get("TVGUI_DB")
+    if env:
+        return env
+    p = "/var/lib/tvgui/attendance.sqlite"
+    if os.path.isdir(os.path.dirname(p)):
+        return p
+    return "attendance.sqlite"
 
 
 def year_start(now=None):

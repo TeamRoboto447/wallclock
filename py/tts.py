@@ -27,6 +27,7 @@ PROMPTS = {
     "_goodbye-student": "good bye student",
     "_goodbye-parent": "good bye parent",
     "_enrolled": "enrolled",
+    "_enabled": "is now enabled",
 }
 _AUDIO_RE = re.compile(rb"audio=([0-9.]+) sec")
 _lock = threading.Lock()
@@ -227,6 +228,10 @@ def enrolled_wav_path(username):
     return os.path.join(tts_dir(), f"{_safe(username)}-enrolled.wav")
 
 
+def enabled_wav_path(username):
+    return os.path.join(tts_dir(), f"{_safe(username)}-enabled.wav")
+
+
 def _ensure_phrase(path, phrase, force=False):
     if not force and os.path.isfile(path):
         return "skip"
@@ -265,6 +270,30 @@ def render_member(member, force=False):
     if ok:
         ok = stitch_member(member)
     return ok
+
+
+def stitch_enabled(member, render_missing=False):
+    """Build '<name> is now enabled' from the person's name clip and the shared
+    prompt. With render_missing, synthesise whichever of the two is absent."""
+    path = enabled_wav_path(member.username)
+    name, prompt = name_wav_path(member.username), prompt_wav_path("_enabled")
+    if render_missing:
+        _ensure_phrase(name, member.pronounce)
+        _ensure_phrase(prompt, PROMPTS["_enabled"])
+    if not (os.path.isfile(name) and os.path.isfile(prompt)):
+        return False
+    _stitch(path, (name, prompt))
+    return True
+
+
+def play_enabled(member):
+    """Say '<name> is now enabled'."""
+    path = enabled_wav_path(member.username)
+    if not os.path.isfile(path):
+        stitch_enabled(member, render_missing=True)
+    if play_wav(path):
+        return
+    say(f"{member.pronounce} is now enabled")
 
 
 def play_greet(member, direction):
@@ -350,6 +379,10 @@ def backfill(store, force=False):
             failed += 1
     stitched = 0
     for member in people:
+        try:
+            stitch_enabled(member)
+        except Exception as e:
+            print(f"tts stitch enabled {member.username}: {e}", flush=True)
         try:
             if stitch_member(member):
                 stitched += 1

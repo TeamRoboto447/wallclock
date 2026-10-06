@@ -10,13 +10,13 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from attendance import Store, year_start
+from attendance import Store, db_path, year_start
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from netstatus import probe as net_probe
 from nfc import EnrollSlot, split_here, start as nfc_start
 from plan import current_week, load_md, load_plan, plan_path, priority_path, today_path
-from tts import backfill, play_greet, say, say_ready
+from tts import backfill, play_enabled, play_greet, say, say_ready
 
 W, H = 1920, 1080
 FONT = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
@@ -41,16 +41,6 @@ NET_POLL_SECS = 10
 GANTT_HEAD_H = 48
 GANTT_ROW_H = 32
 GANTT_PAD = 12
-
-
-def db_path():
-    env = os.environ.get("TVGUI_DB")
-    if env:
-        return env
-    p = "/var/lib/tvgui/attendance.sqlite"
-    if os.path.isdir(os.path.dirname(p)):
-        return p
-    return "attendance.sqlite"
 
 
 def usage():
@@ -171,6 +161,34 @@ def fmt_in(ts, now):
     mins = max(0, now - start) // 60
     h, m = divmod(mins, 60)
     return f"{h}:{m:02d}"
+
+
+def newly_enabled(prev, who):
+    """Members now clocked in whose enabled flag just went from False to True.
+    `prev` ({username: enabled}) is updated to the current state; someone seen
+    for the first time, or already enabled, is not announced."""
+    newly = [m for m, _ in who if m.enabled and prev.get(m.username) is False]
+    prev.clear()
+    prev.update({m.username: m.enabled for m, _ in who})
+    return newly
+
+
+def announce_enabled(members):
+    """Speak each name in turn (one thread so clips don't overlap)."""
+
+    def run():
+        for m in members:
+            try:
+                play_enabled(m)
+            except Exception as e:
+                print(f"enabled announce {m.username}: {e}", flush=True)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def enabled_status(members):
+    names = [m.name for m in members]
+    return " and ".join(names) + (" is now enabled" if len(names) == 1 else " are now enabled")
 
 
 def fmt_total(secs):
@@ -493,6 +511,8 @@ def kiosk():
     threading.Thread(target=_net_loop, daemon=True).start()
     store = Store(db_path())
     who = store.who()
+    prev_enabled = {}
+    newly_enabled(prev_enabled, who)
     mentors, students, parents = split_here(who)
     events = queue.Queue()
     slot = EnrollSlot()
@@ -585,6 +605,10 @@ def kiosk():
                 elif kind == "here":
                     mentors, students, parents = item[1], item[2], item[3]
                     woke = True
+                    fresh = newly_enabled(prev_enabled, store.who())
+                    if fresh:
+                        announce_enabled(fresh)
+                        status = enabled_status(fresh)
                 elif kind == "speak":
                     threading.Thread(target=say, args=(item[1],), daemon=True).start()
                     woke = True
@@ -617,7 +641,17 @@ def kiosk():
         if now - last_refresh >= HERE_REFRESH_SECS:
             last_refresh = now
             try:
-                mentors, students, parents = split_here(store.who())
+                rows = store.who()
+                mentors, students, parents = split_here(rows)
+                fresh = newly_enabled(prev_enabled, rows)
+                if fresh:
+                    announce_enabled(fresh)
+                    status = enabled_status(fresh)
+                    last_active = time.monotonic()
+                    if blanked:
+                        blanked = False
+                        drew_black = False
+                        set_dpms(True)
             except Exception as e:
                 print(f"refresh: {e}", flush=True)
         plan, plan_mtime = load_plan(plan_path())

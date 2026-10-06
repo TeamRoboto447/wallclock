@@ -2,7 +2,8 @@
 """One-way roster pull: Authentik users -> local attendance store.
 
 Env: AUTHENTIK_TOKEN (required), AUTHENTIK_URL (default members.teamroboto.org),
-TVGUI_DB (same as the kiosk).
+TVGUI_DB (same as the kiosk). Writes only what changed and prints only changes
+unless run with -v or --dry-run, so it is cheap to run every 30 seconds.
 """
 import json
 import os
@@ -11,7 +12,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from attendance import Store
+from attendance import Store, db_path
 from member import Member, Role
 
 DEFAULT_URL = "https://members.teamroboto.org"
@@ -82,7 +83,7 @@ def display_names(people):
     return out
 
 
-def sync(users, store, dry_run=False):
+def sync(users, store, dry_run=False, verbose=True):
     added = updated = 0
     notes = []
     known = {p.username: p for p in store.people()}
@@ -104,11 +105,13 @@ def sync(users, store, dry_run=False):
             added += 1
         elif old != m or old.enabled != enabled:
             updated += 1
-        if not dry_run:
+        changed = old is None or old != m or old.enabled != enabled
+        if changed and not dry_run:
             store.upsert(m)
             store.set_enabled(m.username, enabled)
-        print(f"{'+' if old is None else '~' if (old != m or old.enabled != enabled) else '='} "
-              f"{m.username:<14} {m.role:<8} {m.name:<18} {'enabled' if enabled else ''}")
+        if changed or verbose:
+            print(f"{'+' if old is None else '~' if changed else '='} "
+                  f"{m.username:<14} {m.role:<8} {m.name:<18} {'enabled' if enabled else ''}")
     return added, updated, notes
 
 
@@ -118,13 +121,15 @@ def main():
         print("sync_authentik: AUTHENTIK_TOKEN not set", file=sys.stderr)
         return 1
     dry_run = "--dry-run" in sys.argv[1:]
-    from tvgui import db_path
+    verbose = dry_run or "-v" in sys.argv[1:]
 
     users = fetch_users(os.environ.get("AUTHENTIK_URL", DEFAULT_URL), token)
-    added, updated, notes = sync(users, Store(db_path()), dry_run)
-    for n in notes:
-        print(f"note: {n}", file=sys.stderr)
-    print(f"{'would sync' if dry_run else 'synced'}: {added} new, {updated} changed")
+    added, updated, notes = sync(users, Store(db_path()), dry_run, verbose)
+    if verbose:
+        for n in notes:
+            print(f"note: {n}", file=sys.stderr)
+    if verbose or added or updated:
+        print(f"{'would sync' if dry_run else 'synced'}: {added} new, {updated} changed")
     return 0
 
 

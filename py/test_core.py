@@ -23,7 +23,7 @@ from sync_leantime import (
     blocking_ids, is_priority, overdue, plan_moves, render_plan, render_today,
     roll_values, week_deadline,
 )
-from tvgui import fmt_total, plan_height, today_pages
+from tvgui import enabled_status, fmt_total, newly_enabled, plan_height, today_pages
 from nfc import split_here
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
@@ -299,6 +299,26 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(fmt_total(3600 + 125), "1:02")
         self.assertEqual(fmt_total(37 * 3600 + 1800), "37:30")
 
+    def test_newly_enabled_only_on_false_to_true_while_here(self):
+        def person(user, enabled):
+            m = Member.new(user, user)
+            m.enabled = enabled
+            return (m, 1000)
+        prev = {}
+        self.assertEqual(newly_enabled(prev, [person("a", False), person("b", True)]), [])  # first sight
+        got = newly_enabled(prev, [person("a", True), person("b", True), person("c", True)])
+        self.assertEqual([m.username for m in got], ["a"])   # c is new, b was already enabled
+        self.assertEqual(newly_enabled(prev, [person("a", True)]), [])  # no repeat
+        newly_enabled(prev, [person("a", False)])             # loses it, then regains it
+        self.assertEqual([m.username for m in newly_enabled(prev, [person("a", True)])], ["a"])
+        self.assertEqual(newly_enabled(prev, []), [])          # clocked out: forgotten
+        self.assertEqual(newly_enabled(prev, [person("a", True)]), [])  # back in already enabled
+
+    def test_enabled_status_text(self):
+        a, b = Member.new("Ann", "a"), Member.new("Bo", "b")
+        self.assertEqual(enabled_status([a]), "Ann is now enabled")
+        self.assertEqual(enabled_status([a, b]), "Ann and Bo are now enabled")
+
     def test_totals_reset_at_january_first(self):
         store = Store(":memory:")
         m = Member.new("Jane Doe", "jdoe")
@@ -308,6 +328,22 @@ class SyncTests(unittest.TestCase):
             store.toggle(m, ts)  # session across new year (1800s counts), then 1000s
         self.assertEqual(store.closed_secs(jan1), {"jdoe": 1800 + 1000})
         self.assertEqual(store.closed_secs(), {"jdoe": 5400 + 1000})
+
+    def test_unchanged_roster_is_not_rewritten(self):
+        from sync_authentik import sync
+        store = Store(":memory:")
+        users = [self.user(["Students", "Enabled"], username="a", name="Ann Lee"),
+                 self.user(["Students"], username="b", name="Bo Kim")]
+        self.assertEqual(sync(users, store, verbose=False)[:2], (2, 0))
+        writes = []
+        real_upsert, real_enabled = store.upsert, store.set_enabled
+        store.upsert = lambda m: (writes.append(m.username), real_upsert(m))
+        store.set_enabled = lambda u, e: (writes.append(u), real_enabled(u, e))
+        self.assertEqual(sync(users, store, verbose=False)[:2], (0, 0))
+        self.assertEqual(writes, [])  # nothing changed, nothing written
+        users[1]["groups_obj"].append({"name": "Enabled"})  # Bo becomes enabled
+        self.assertEqual(sync(users, store, verbose=False)[:2], (0, 1))
+        self.assertEqual(writes, ["b", "b"])
 
     def test_enabled_survives_punch_upsert(self):
         store = Store(":memory:")

@@ -3,7 +3,8 @@ Description=Periodic tvgui roster sync from Authentik
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=30s
+AccuracySec=1s
 Persistent=true
 
 [Install]
