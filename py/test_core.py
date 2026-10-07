@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import os
+import re
 import tempfile
 import unittest
 
@@ -20,10 +21,12 @@ from tts import (
 import ndef
 from sync_authentik import convert, display_names
 from sync_leantime import (
-    blocking_ids, is_priority, overdue, plan_moves, render_plan, render_today,
-    roll_values, week_deadline,
+    blocking_ids, chain_order, is_priority, overdue, plan_moves, render_plan,
+    render_today, roll_values, week_deadline,
 )
-from tvgui import enabled_status, fmt_total, newly_enabled, plan_height, today_pages
+from tvgui import (
+    enabled_status, fmt_total, newly_enabled, plan_height, today_offset_weeks, today_pages,
+)
 from nfc import split_here
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
@@ -525,11 +528,46 @@ class LeantimeRenderTests(unittest.TestCase):
         self.assertEqual((kick[1], kick[2], kick[3]), ("Kick-Off", 13, 14))  # Fri 1/1 .. Wed 1/6 crosses a week
         self.assertEqual(g["weeks"], 14)
 
+    def test_connected_milestones_are_listed_together(self):
+        mk = lambda i, a, b, dep=None: {"id": i, "headline": f"M{i}", "status": 3, "type": "milestone",
+                                        "editFrom": a, "editTo": b, "milestoneid": dep}
+        ms = [
+            mk(1, "2026-10-05", "2026-10-11"),                # chain A root
+            mk(9, "2026-10-06", "2026-10-30"),                # unrelated, starts between A's members
+            mk(2, "2026-10-12", "2026-10-18", 1),             # A: depends on 1
+            mk(3, "2026-10-19", "2026-10-25", 2),             # A: depends on 2
+            mk(4, "2026-10-14", "2026-10-15", 1),             # A: also depends on 1, starts before 3
+            mk(5, "2026-10-01", "2026-10-02"),                # unrelated, earliest
+        ]
+        text = render_plan(ms, today=datetime.date(2026, 10, 1))
+        order = [int(x) for x in re.findall(r"--- M(\d+)", text)]
+        self.assertEqual(order, [5, 1, 2, 3, 4, 9])  # 1 then its dependents depth-first, 9 and 5 apart
+
+    def test_chain_order_survives_a_cycle_and_missing_prerequisite(self):
+        d = datetime.date
+        row = lambda k, dep, day: {"start": d(2026, 10, day), "end": d(2026, 10, day), "key": k, "dep": dep, "line": str(k)}
+        self.assertEqual(sorted(r["key"] for r in chain_order([row(1, 2, 1), row(2, 1, 2)])), [1, 2])
+        self.assertEqual([r["key"] for r in chain_order([row(7, 99, 3), row(8, 7, 1)])], [7, 8])  # 8 depends on 7; 7's own prerequisite is absent
+
     def test_dependency_cycle_terminates(self):
         today = datetime.date(2026, 9, 30)
         ms = [{"id": 1, "type": "milestone", "status": 3, "editFrom": "2026-09-14", "editTo": "2026-09-20", "dependingTicketId": 2},
               {"id": 2, "type": "milestone", "status": 3, "editFrom": "2026-09-14", "editTo": "2026-09-20", "dependingTicketId": 1}]
         self.assertEqual(set(plan_moves(ms, today)), {1, 2})
+
+    def test_today_lists_open_tasks_first_and_drops_done_milestones(self):
+        ms = lambda i, status, start: {"id": i, "type": "milestone", "status": status, "headline": f"M{i}",
+                                       "editFrom": start, "editTo": start}
+        task = lambda i, m, s=3: {"id": i, "type": "task", "status": s, "milestoneid": m, "headline": f"t{i}"}
+        everything = [ms(10, 4, "2026-10-05"), ms(11, 0, "2026-09-28"),     # 11 is Done
+                      task(1, 10, 0), task(2, 10, 3), task(3, 10, 0), task(4, 11, 3), task(5, 0, 0), task(6, 0)]
+        tasks = [t for t in everything if t["type"] == "task"]
+        text = render_today(tasks, everything=everything, hide_done_milestones=True)
+        self.assertEqual(text, "# M10\n- [ ] t2\n- [x] t1\n- [x] t3\n\n# No milestone\n- [ ] t6\n- [x] t5\n")
+        self.assertNotIn("M11", text)
+        self.assertNotIn("t4", text)
+        # the priority list keeps tasks of finished milestones
+        self.assertIn("M11", render_today(tasks, everything=everything))
 
     def test_task_waiting_on_dependency_shows_blocked(self):
         tasks = [
@@ -579,7 +617,7 @@ class LeantimeRenderTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
-    def test_today_pages_one_per_tag_and_paginate(self):
+    def test_today_pages_one_per_milestone_and_paginate_open_tasks(self):
         items = [("h", "A"), ("todo", "1"), ("todo", "2"), ("todo", "3"), ("h", "B"), ("done", "x")]
         pages = today_pages(items, 2)
         self.assertEqual(
@@ -591,12 +629,38 @@ class LayoutTests(unittest.TestCase):
             ],
         )
 
+    def test_today_line_is_at_the_exact_day(self):
+        start = datetime.date(2026, 9, 28)
+        at = lambda y, mo, d, h=0: datetime.datetime(y, mo, d, h).timestamp()
+        self.assertEqual(today_offset_weeks(start, 5, at(2026, 9, 28)), 0.0)
+        self.assertAlmostEqual(today_offset_weeks(start, 5, at(2026, 10, 6, 12)), 8.5 / 7)  # Tue of week 2
+        self.assertIsNone(today_offset_weeks(start, 5, at(2026, 9, 27, 23)))   # before the plan
+        self.assertIsNone(today_offset_weeks(start, 5, at(2026, 11, 2)))       # after it
+        self.assertIsNone(today_offset_weeks(None, 5, at(2026, 10, 6)))
+
+    def test_finished_tasks_never_add_pages(self):
+        items = [("h", "A"), ("todo", "1"), ("done", "d1"), ("done", "d2"), ("done", "d3"), ("done", "d4"),
+                 ("h", "B")] + [("done", f"b{i}") for i in range(7)]
+        pages = today_pages(items, 4)
+        # A: one open task + 4 finished, 4 rows: two finished shown, the other two summarised
+        self.assertEqual(pages[0], [("h", "A"), ("todo", "1"), ("done", "d1"), ("done", "d2"), ("more", "+2 more done")])
+        self.assertEqual([p[0] for p in pages], [("h", "A"), ("h", "B")])  # one page each
+        # B has only finished tasks: a single page, capped, with a summary of the rest
+        self.assertEqual(len(pages[1]) - 1, 4)
+        self.assertEqual(pages[1][-1], ("more", "+4 more done"))
+
+    def test_finished_fill_leftover_room_on_last_open_page(self):
+        items = [("h", "A")] + [("todo", str(i)) for i in range(5)] + [("done", "d")]
+        pages = today_pages(items, 4)
+        self.assertEqual(len(pages), 2)                       # 4 open + 1 open
+        self.assertEqual(pages[1][1:], [("todo", "4"), ("done", "d")])  # done fills the room
+
     def test_today_pages_empty(self):
         self.assertEqual(today_pages([], 5), [])
 
     def test_plan_height_scales_and_caps(self):
         bars = lambda n: {"bars": [("new", "x", 1, 1)] * n}
-        self.assertEqual(plan_height(bars(2), 400), 48 + 2 * 32 + 12)
+        self.assertEqual(plan_height(bars(2), 400), 64 + 2 * 32 + 12)
         self.assertEqual(plan_height(bars(50), 400), 400)
 
 

@@ -115,13 +115,43 @@ def blocking_ids(tickets):
     return {dep["id"] for t in tickets if unfinished(t) and (dep := waiting_on(t, by_id))}
 
 
+def chain_order(rows):
+    """Order rows [(start, end, ..., key, dep_key)] so milestones that depend on
+    each other sit together: each unrelated chain in start order, and within a
+    chain a milestone is followed by those that depend on it (start order),
+    each of those followed by its own dependents."""
+    rows = sorted(rows, key=lambda r: (r["start"], r["end"]))
+    present = {r["key"] for r in rows}
+    children = {}
+    roots = []
+    for r in rows:
+        if r["dep"] in present and r["dep"] != r["key"]:
+            children.setdefault(r["dep"], []).append(r)
+        else:
+            roots.append(r)
+    ordered, seen = [], set()
+
+    def visit(r):
+        if r["key"] in seen:
+            return
+        seen.add(r["key"])
+        ordered.append(r)
+        for c in children.get(r["key"], []):
+            visit(c)
+
+    for r in roots + rows:  # `rows` again picks up members of a dependency cycle
+        visit(r)
+    return ordered
+
+
 def render_plan(milestones, today=None):
     """plan.md text. A milestone waiting on an unfinished milestone it depends
-    on is shown as blocked whatever its own status says."""
+    on is shown as blocked whatever its own status says; milestones that depend
+    on each other are listed together (see chain_order)."""
     today = today or datetime.date.today()
     by_id = {m["id"]: m for m in milestones if "id" in m}
     rows = []
-    for m in milestones:
+    for n, m in enumerate(milestones):
         try:
             a, b = _date(m["editFrom"]), _date(m["editTo"])
         except (TypeError, ValueError):
@@ -133,22 +163,23 @@ def render_plan(milestones, today=None):
         mid = m.get("id", 0)
         tag = f"{{{mid}<{dep_id(m)}}}" if dep_id(m) else f"{{{mid}}}"
         mark = "!" if unfinished(m) and waiting_on(m, by_id) else MARKER.get(m.get("status"), " ")
-        rows.append((a, b, m["headline"].strip(), mark, tag))
-    rows.sort(key=lambda r: (r[0], r[1]))
-    lines = []
-    for a, b, name, mark, tag in rows:
-        lines.append(f"[{mark}] {a.month}/{a.day}/{a.year} - {b.month}/{b.day}/{b.year} --- {name} {tag}")
+        key = mid if "id" in m else -(n + 1)  # fixtures without ids stay distinct
+        line = f"[{mark}] {a.month}/{a.day}/{a.year} - {b.month}/{b.day}/{b.year} --- {m['headline'].strip()} {tag}"
+        rows.append({"start": a, "end": b, "key": key, "dep": dep_id(m), "line": line})
+    lines = [r["line"] for r in chain_order(rows)]
     return "\n\n".join(lines) + "\n" if lines else ""
 
 
 NO_MILESTONE = "No milestone"
 
 
-def render_today(tasks, keep=None, everything=None):
+def render_today(tasks, keep=None, everything=None, hide_done_milestones=False):
     """today.md text, tasks grouped under their milestone (in milestone start
-    order, tasks without one last). `everything` is every ticket, milestones
-    too, used to find milestone names and resolve 'Depends On': a task waiting
-    on an unfinished ticket shows as blocked."""
+    order, tasks without one last), unfinished tasks before finished ones.
+    `everything` is every ticket, milestones too, used to find milestone names
+    and resolve 'Depends On': a task waiting on an unfinished ticket shows as
+    blocked. With hide_done_milestones, a Done or archived milestone and all
+    its tasks are left out."""
     by_id = {t["id"]: t for t in (everything if everything is not None else tasks)}
 
     def milestone_of(t):
@@ -170,15 +201,18 @@ def render_today(tasks, keep=None, everything=None):
         if keep and not keep(t):
             continue
         ms = milestone_of(t)
+        if hide_done_milestones and ms is not None and not unfinished(ms):
+            continue
         mark, text = MARKER.get(t.get("status"), " "), t["headline"].strip()
         dep = waiting_on(t, by_id) if unfinished(t) else None
         if dep:
             mark, text = "!", f"{text} \u2190 waiting on {dep['headline'].strip()}"
         entry = groups.setdefault(ms["id"] if ms else 0, (ms, []))
-        entry[1].append(f"- [{mark}] {text}")
+        entry[1].append((t.get("status") == DONE, f"- [{mark}] {text}"))
     ordered = sorted(groups.values(), key=lambda g: order(g[0]))
     return "\n\n".join(
-        f"# {ms['headline'].strip() if ms else NO_MILESTONE}\n" + "\n".join(lines)
+        f"# {ms['headline'].strip() if ms else NO_MILESTONE}\n"
+        + "\n".join(line for _, line in sorted(lines, key=lambda x: x[0]))  # stable: open first
         for ms, lines in ordered
     ) + "\n" if ordered else ""
 
@@ -308,7 +342,7 @@ def sync_once(client, crit, roll=False):
         name
         for name, path, text in (
             ("plan", plan_path(), render_plan(milestones)),
-            ("today", today_path(), render_today(tasks, everything=tasks)),
+            ("today", today_path(), render_today(tasks, everything=tasks, hide_done_milestones=True)),
             ("priority", priority_path(),
              render_today(tasks, lambda t: is_priority(t, blockers), tasks)),
         )

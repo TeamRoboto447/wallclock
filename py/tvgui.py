@@ -30,7 +30,8 @@ BLUE = (0x4A, 0x9E, 0xE0)
 YELLOW = (0xE6, 0xB4, 0x22)
 LTRED = (0xE5, 0x48, 0x4D)
 STATUS_COLOR = {"new": BLUE, "wip": YELLOW, "blocked": LTRED, "done": GREEN}
-MD_MARK = {"todo": ("[ ]", BLUE), "wip": ("[~]", YELLOW), "blocked": ("[!]", LTRED), "done": ("[x]", GREEN)}
+MUTED = (0x6A, 0x6A, 0x62)
+MD_MARK = {"more": ("", MUTED), "todo": ("[ ]", BLUE), "wip": ("[~]", YELLOW), "blocked": ("[!]", LTRED), "done": ("[x]", GREEN)}
 PANEL = (0x1A, 0x1A, 0x1A)
 BORDER = (0x3A, 0x3A, 0x3A)
 GRID = (0x2A, 0x2A, 0x2A)
@@ -38,7 +39,7 @@ STATUS_BG = (0x3A, 0x0A, 0x0A)
 HERE_REFRESH_SECS = 30
 CYCLE_SECS = 10
 NET_POLL_SECS = 10
-GANTT_HEAD_H = 48
+GANTT_HEAD_H = 64
 GANTT_ROW_H = 32
 GANTT_PAD = 12
 
@@ -197,7 +198,6 @@ def fmt_total(secs):
 
 
 DONE = (0x7A, 0x7A, 0x72)
-MUTED = (0x6A, 0x6A, 0x62)
 
 
 def _clip_blit(surf, img, pos, rect):
@@ -287,6 +287,16 @@ def _draw_here(surf, rect, mentors, students, parents, font_sm, now):
         y += 10
 
 
+def today_offset_weeks(start, weeks, now):
+    """Where `now` falls on the plan, in weeks from its start (days and the time
+    of day included), or None if it is before the plan starts or after it ends."""
+    if not start:
+        return None
+    n = datetime.datetime.fromtimestamp(now)
+    days = (n.date() - start).days + (n.hour * 3600 + n.minute * 60 + n.second) / 86400
+    return days / 7 if 0 <= days < weeks * 7 else None
+
+
 def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
     import pygame
 
@@ -317,14 +327,19 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
             label = f"{d.month}/{d.day}" + (f"/{d.year % 100}" if d.year != this_year else "")
             if col_w * step >= 150:
                 label = f"W{i + 1} {label}"
-            surf.blit(font_sm.render(label, True, MUTED), (x + 4, rect.y + 20))
+            surf.blit(font_sm.render(label, True, MUTED), (x + 4, rect.y + 10))
         elif not plan.get("start") and i % step == 0:
-            surf.blit(font_sm.render(f"W{i + 1}", True, MUTED), (x + 4, rect.y + 20))
+            surf.blit(font_sm.render(f"W{i + 1}", True, MUTED), (x + 4, rect.y + 10))
     pygame.draw.line(surf, BORDER, (grid.right - 1, grid.y), (grid.right - 1, grid.bottom - 1), 1)
-    cur = current_week(plan.get("start"), weeks, now)
-    if cur:
-        cx = int(grid.x + (cur - 0.5) * col_w)
-        pygame.draw.line(surf, RED, (cx, grid.y), (cx, grid.bottom - 1), 2)
+    off = today_offset_weeks(plan.get("start"), weeks, now)
+    if off is not None:  # the line sits at the exact moment, with a "today" tag above it
+        cx = int(grid.x + off * col_w)
+        tag = font_sm.render("today", True, INK)
+        box = pygame.Rect(0, grid.y - 28, tag.get_width() + 14, 24)
+        box.x = max(grid.x, min(cx - box.width // 2, grid.right - box.width))
+        pygame.draw.rect(surf, RED, box, border_radius=4)
+        surf.blit(tag, (box.x + 7, box.y + (box.height - tag.get_height()) // 2))
+        pygame.draw.line(surf, RED, (cx, box.bottom), (cx, grid.bottom - 1), 2)
     y = grid.y
     placed = {}  # milestone id -> (row y, left x, right x, status)
     for status, name, lo, hi, d0, d1, bid, bdep in bars:
@@ -372,7 +387,10 @@ def _draw_dependencies(surf, placed, row_h):
 
 
 def today_pages(items, cap):
-    """Split md items into pages of at most cap task rows, one heading (milestone) per page."""
+    """Split md items into pages of at most cap task rows, one heading
+    (milestone) per page. Only unfinished tasks make pages; finished ones fill
+    whatever room is left on the last page and are never given pages of their
+    own, with a '+N more done' line for any that don't fit."""
     groups = []
     for kind, text in items:
         if kind == "h" or not groups:
@@ -384,7 +402,16 @@ def today_pages(items, cap):
     for head, rows in groups:
         if not rows and head is None:
             continue
-        chunks = [rows[i:i + cap] for i in range(0, len(rows), cap)] or [[]]
+        open_rows = [r for r in rows if r[0] != "done"]
+        done_rows = [r for r in rows if r[0] == "done"]
+        chunks = [open_rows[i:i + cap] for i in range(0, len(open_rows), cap)] or [[]]
+        last = chunks[-1]
+        room = max(0, cap - len(last))
+        if done_rows and len(done_rows) <= room:
+            last += done_rows
+        elif done_rows and room >= 1:  # keep one row for the summary
+            keep = room - 1
+            last += done_rows[:keep] + [("more", f"+{len(done_rows) - keep} more done")]
         for c in chunks:
             pages.append(([("h", head)] if head else []) + c)
     return pages
