@@ -27,6 +27,7 @@ class Member:
         self.role = role
         self.enabled = False
         self.closed_secs = 0  # time in completed sessions, set by Store
+        self.location = None  # where they clocked in, set by Store.who()
 
     def __eq__(self, other):
         return (

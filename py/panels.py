@@ -86,7 +86,8 @@ def _draw_md(surf, rect, title, items, font_mid, font_sm):
         y += 32
 
 
-def _draw_here(surf, rect, mentors, students, parents, font_sm, now):
+def _draw_here(surf, rect, groups, font_sm, now):
+    """groups: [(heading, rows)], rows = (name, ts, enabled, closed_secs, ...)."""
     import pygame
 
     pygame.draw.rect(surf, PANEL, rect)
@@ -102,18 +103,14 @@ def _draw_here(surf, rect, mentors, students, parents, font_sm, now):
     pygame.draw.line(surf, GRID, (rect.x + 8, grid_top), (rect.right - 8, grid_top), 1)
     y = rect.y + 52
     x = rect.x + 20
-    for label, names in (
-        (f"students ({len(students)})", students),
-        (f"parents ({len(parents)})", parents),
-        (f"mentors ({len(mentors)})", mentors),
-    ):
+    for label, names in groups:
         if y >= rect.bottom - 28:
             break
         img = font_sm.render(label, True, CORAL)
         if not _clip_blit(surf, img, (x, y), rect):
             break
         y += 32
-        for name, ts, enabled, closed in names:
+        for name, ts, enabled, closed, *_ in names:
             color = GREEN if enabled else INK
             max_name = meet_r - 84 - x
             while len(name) > 1 and font_sm.size(name)[0] > max_name:

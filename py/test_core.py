@@ -26,7 +26,8 @@ from sync_leantime import (
 )
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
-from nfc import _run_fake, split_here
+from nfc import PENDING, _run_fake, split_here, tap
+from handlers.here import groups as here_groups
 from layout import LayoutFile, module_key, resolve
 from refresh import Refresher
 import nexus
@@ -302,7 +303,7 @@ class SyncTests(unittest.TestCase):
             store.toggle(m, ts)
         self.assertEqual(store.closed_secs(), {"jdoe": 3600})
         _, students, _ = split_here(store.who())
-        self.assertEqual(students, [("Jane Doe", b + 10000, False, 3600)])
+        self.assertEqual(students, [("Jane Doe", b + 10000, False, 3600, None)])
         self.assertEqual(fmt_total(3600 + 125), "1:02")
         self.assertEqual(fmt_total(37 * 3600 + 1800), "37:30")
 
@@ -900,6 +901,65 @@ class NexusTests(unittest.TestCase):
     def test_eta_text(self):
         m = 60_000
         self.assertEqual([nexus.eta_text(t * m, 0) for t in (-3, 0, 12, 89, 125)], ["now", "now", "12 min", "89 min", "2h 05m"])
+
+
+class LocationTests(unittest.TestCase):
+    def setUp(self):
+        PENDING.loc = None
+        self.store = Store(":memory:")
+        self.m = Member.new("Jane Doe", "jdoe")
+
+    def tap(self, now, require=True):
+        import unittest.mock as mock
+        env = {"TVGUI_REQUIRE_LOCATION": "1"} if require else {}
+        with mock.patch.dict(os.environ, env, clear=False):
+            if not require:
+                os.environ.pop("TVGUI_REQUIRE_LOCATION", None)
+            return tap(self.store, self.m, now)
+
+    def where(self):
+        return [m.location for m, _ in self.store.who()]
+
+    def test_clock_in_needs_a_location_when_required(self):
+        self.assertEqual(self.tap(100), (None, "Pick a location first"))
+        self.assertEqual(self.store.who(), [])
+        PENDING.arm("  Practice   Field ")
+        punch, note = self.tap(200)
+        self.assertEqual((punch.direction, note), (IN, None))
+        self.assertEqual(self.where(), ["practice field"])        # normalised
+        self.assertIsNone(PENDING.take())                          # consumed by the tap
+
+    def test_wall_display_does_not_require_one(self):
+        punch, _ = self.tap(100, require=False)
+        self.assertEqual(punch.direction, IN)
+        self.assertEqual(self.where(), [None])
+
+    def test_armed_tap_while_in_moves_and_plain_tap_clocks_out(self):
+        PENDING.arm("pit")
+        self.tap(100)
+        PENDING.arm("stands")
+        self.assertEqual(self.tap(200), (None, "Jane Doe moved to stands"))
+        self.assertEqual(self.where(), ["stands"])
+        punch, _ = self.tap(300)
+        self.assertEqual(punch.direction, OUT)
+        self.assertEqual(self.store.who(), [])
+
+    def test_armed_location_expires(self):
+        PENDING.arm("pit", now=1000)
+        self.assertIsNone(PENDING.take(now=1000 + PENDING.SECS))
+        PENDING.arm("pit", now=1000)
+        self.assertEqual(PENDING.take(now=1000 + PENDING.SECS - 1), "pit")
+
+    def test_here_groups_by_location_in_layout_order(self):
+        class C:
+            mentors = [("Zed", 0, False, 0, "pit")]
+            students = [("Amy", 0, False, 0, "stands"), ("Bo", 0, False, 0, "pit"), ("Cy", 0, False, 0, "garage"), ("Di", 0, False, 0, None)]
+            parents = []
+        out = here_groups(C, {"group_by": "location", "locations": ["pit", "practice field", "stands"]})
+        self.assertEqual([(h, [r[0] for r in rows]) for h, rows in out],
+                         [("pit (2)", ["Bo", "Zed"]), ("practice field (0)", []), ("stands (1)", ["Amy"]),
+                          ("garage (1)", ["Cy"]), ("unassigned (1)", ["Di"])])
+        self.assertEqual([h for h, _ in here_groups(C, {})], ["students (4)", "parents (0)", "mentors (1)"])
 
 
 if __name__ == "__main__":

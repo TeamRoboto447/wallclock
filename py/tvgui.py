@@ -32,6 +32,7 @@ def usage():
         file=sys.stderr,
     )
     print("tvgui.py blank|unblank|status|dump|scan|tts-backfill", file=sys.stderr)
+    print("tvgui.py location NAME   (arm a location for the next badge tap; the Stream Deck does this)", file=sys.stderr)
     print("tvgui.py punches [USER] [--limit N]", file=sys.stderr)
     print(
         "tvgui.py fix-punch USER TIME [--date YYYY-MM-DD] [--note TEXT] [--dry-run]"
@@ -404,6 +405,12 @@ def main():
         from fixture import save
 
         save(args[1] if len(args) > 1 else "screen-fixture.png")
+    elif cmd == "location":
+        try:
+            sys.stdout.write(kiosk_cmd("LOCATION " + " ".join(args[1:])))
+        except Exception as e:
+            print(f"location: {e}", file=sys.stderr)
+            sys.exit(1)
     elif cmd == "tts-backfill":
         try:
             backfill(Store(db_path()), force=False)

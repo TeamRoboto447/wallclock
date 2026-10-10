@@ -1,6 +1,6 @@
 [
   {"handler": "title", "x": 24, "y": 24, "w": 400, "h": 40},
-  {"handler": "here", "x": 24, "y": 80, "w": 456, "h": 812},
+  {"handler": "here", "x": 24, "y": 80, "w": 456, "h": 812, "opts": {"group_by": "location", "locations": ["pit", "practice field", "stands", "field", "cafeteria"]}},
   {"handler": "nexus_next", "x": 504, "y": 80, "w": 1392, "h": 290, "opts": {"event": "demo1509", "team": "800", "title": "next match (team 800)"}},
   {"handler": "nexus_schedule", "x": 504, "y": 394, "w": 684, "bottom": 892, "opts": {"event": "demo1509", "title": "match schedule"}},
   {"handler": "nexus_feed", "x": 1212, "y": 394, "w": 684, "h": 230, "opts": {"event": "demo1509", "kind": "parts"}},

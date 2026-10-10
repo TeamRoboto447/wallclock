@@ -24,7 +24,7 @@ CFG_PAGES = {
 def split_here(who):
     mentors, students, parents = [], [], []
     for m, ts in who:
-        row = (m.name, ts, m.enabled, m.closed_secs)
+        row = (m.name, ts, m.enabled, m.closed_secs, m.location)
         if m.role == Role.MENTOR:
             mentors.append(row)
         elif m.role == Role.PARENT:
@@ -32,6 +32,58 @@ def split_here(who):
         else:
             students.append(row)
     return mentors, students, parents
+
+
+class PendingLocation:
+    """A location armed by a Stream Deck button (or `tvgui.py location NAME`) for the next badge tap."""
+
+    SECS = 30
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.loc = None
+        self.until = 0
+
+    def arm(self, loc, event_q=None, now=None):
+        loc = " ".join(loc.lower().split())
+        if not loc:
+            raise ValueError("empty location")
+        with self.lock:
+            self.loc, self.until = loc, (now or time.time()) + self.SECS
+        if event_q is not None:
+            event_q.put(("status", f"{loc}: tap your badge"))
+            t = threading.Timer(self.SECS, self._expire, (loc, event_q))
+            t.daemon = True
+            t.start()
+
+    def take(self, now=None):
+        with self.lock:
+            loc, until, self.loc = self.loc, self.until, None
+        return loc if loc and (now or time.time()) < until else None
+
+    def _expire(self, loc, event_q):
+        with self.lock:
+            if self.loc != loc or time.time() < self.until:
+                return  # already used, or re-armed (its own timer will fire)
+            self.loc = None
+        event_q.put(("status", "Hold your badge over the reader"))
+
+
+PENDING = PendingLocation()
+
+
+def tap(store, member, now):
+    """One badge tap -> (punch or None, note or None). A location armed beforehand tags a clock-in or,
+    for someone already in, moves them instead of clocking out. With TVGUI_REQUIRE_LOCATION=1 a
+    clock-in without one is refused (the pit display; the wall display leaves it off)."""
+    loc = PENDING.take()
+    inside = store.is_in(member.username)
+    if inside and loc:
+        store.set_location(member.username, loc)
+        return None, f"{member.name} moved to {loc}"
+    if not inside and not loc and os.environ.get("TVGUI_REQUIRE_LOCATION"):
+        return None, "Pick a location first"
+    return store.toggle(member, now, DEBOUNCE, None if inside else loc), None
 
 
 def _acr_reader():
@@ -411,17 +463,23 @@ class EnrollSlot:
 
 def _run_fake(store, enroll_slot, event_q, lines=None):
     """Laptop stand-in for the reader (TVGUI_FAKE_NFC=1): each stdin line is
-    'username[:role]' and acts like a badge tap. Unknown users are created.
+    'username[:role]' (a badge tap; unknown users are created) or '@location' (a Stream Deck press).
     shortcut: no enroll or tag writes, use the real reader for those."""
     event_q.put(("status", "Hold your badge over the reader"))
     for line in lines if lines is not None else sys.stdin:
         user, _, role = line.strip().partition(":")
         if not user:
             continue
+        if user.startswith("@"):
+            PENDING.arm(user[1:], event_q)
+            continue
         if store.get(user) is None:
             store.upsert(Member(user.title(), user, user, Role.parse(role) or Role.STUDENT))
             store.set_enabled(user, True)
-        punch = store.toggle(store.get(user), now_secs(), DEBOUNCE)
+        punch, note = tap(store, store.get(user), now_secs())
+        if note:
+            event_q.put(("status", note))
+            event_q.put(("here",) + split_here(store.who()))
         if punch:
             event_q.put(("greet", punch.member, punch.direction))
             verb = "badged in" if punch.direction == IN else "badged out"
@@ -572,7 +630,10 @@ def _run(store, enroll_slot, event_q):
                         pass
                     conn, member = read_member_retry(reader)
                     if member:
-                        punch = store.toggle(member, now_secs(), DEBOUNCE)
+                        punch, note = tap(store, member, now_secs())
+                        if note:
+                            event_q.put(("status", note))
+                            event_q.put(("here",) + split_here(store.who()))
                         if punch:
                             try:
                                 _transmit(conn, PUNCH_LED)

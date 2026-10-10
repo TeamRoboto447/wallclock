@@ -4,7 +4,7 @@ import threading
 from queue import Queue, Empty
 
 from member import Member, Role
-from nfc import DumpReq, EnrollReq, ScanReq
+from nfc import PENDING, DumpReq, EnrollReq, ScanReq
 
 
 def socket_path():
@@ -53,6 +53,14 @@ def _handle(conn, enroll_slot, event_q, state):
             else:
                 event_q.put(("unblank",))
                 f.write(b"OK\n")
+            f.flush()
+            return
+        if cmd.startswith("LOCATION "):
+            try:
+                PENDING.arm(cmd[9:], event_q)
+                f.write(b"OK\n")
+            except ValueError as e:
+                f.write(f"ERR {e}\n".encode())
             f.flush()
             return
         if cmd == "STATUS":

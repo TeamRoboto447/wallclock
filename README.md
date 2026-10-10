@@ -64,6 +64,15 @@ Authentik (every 30s) and Leantime (every 15s). The script unsets `LEANTIME_ROLL
 written back. Speech needs piper in `.local/piper/` (binary `piper`, voice `en_US-bryce-medium.onnx`);
 without it you get "piper: no audio" and no sound.
 
+## Locations (pit display)
+
+`py/layouts/pit.json` groups who's-here by location instead of role. A location is armed first
+(the Stream Deck will do this; for now `python3 py/tvgui.py location pit`, or type `@pit` in the
+laptop fake reader) and the next badge tap uses it, for 30 seconds. Armed + tap while clocked in
+moves the person; a plain tap clocks out. Set `TVGUI_REQUIRE_LOCATION=1` on the pit display to refuse
+clock-ins without one; leave it unset on the wall display. Try it:
+`TVGUI_REQUIRE_LOCATION=1 TVGUI_LAYOUT=py/layouts/pit.json scripts/dev.sh`
+
 ## Layout
 
 | Path | Role |
