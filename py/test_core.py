@@ -27,7 +27,9 @@ from sync_leantime import (
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
 from nfc import _run_fake, split_here
-from layout import LayoutFile, resolve
+from layout import LayoutFile, module_key, resolve
+from refresh import Refresher
+from panels import age_text
 from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
@@ -818,6 +820,68 @@ class LayoutResolveTests(unittest.TestCase):
         f = pygame.font.Font(None, 20)
         ctx = Ctx((1920, 1080), (f, f, f), 0, [], [], [], "", {}, [], [], ("ok", 3))
         self.assertEqual(render_layout(bad, ctx).get_size(), (1920, 1080))  # no exception
+
+
+class RefreshTests(unittest.TestCase):
+    def wait(self, cond, secs=2.0):
+        import time
+        end = time.time() + secs
+        while time.time() < end and not cond():
+            time.sleep(0.005)
+        return cond()
+
+    def handlers(self, calls):
+        import types
+
+        def refresh(opts):
+            calls.append(opts)
+            if opts.get("fail"):
+                raise RuntimeError("down")
+            return len(calls)
+
+        mod = types.SimpleNamespace(INTERVAL=0.01, refresh=refresh)
+        plain = types.SimpleNamespace()  # no refresh(): no thread
+        return lambda name: mod if name == "net" else plain
+
+    def test_refresh_runs_in_background_and_stops_when_module_removed(self):
+        calls = []
+        r = Refresher()
+        layout = [{"handler": "net", "opts": {"a": 1}}, {"handler": "net", "opts": {"a": 1}}, {"handler": "plain"}]
+        r.sync(layout, self.handlers(calls))
+        key = module_key("net", {"a": 1})
+        self.assertEqual(list(r.state), [key])                  # duplicates share one thread; plain has none
+        self.assertTrue(self.wait(lambda: r.state[key].at is not None and r.state[key].value >= 2))
+        r.sync([{"handler": "plain"}], self.handlers(calls))
+        self.assertEqual(r.state, {})
+        n = len(calls)
+        import time
+        time.sleep(0.1)
+        self.assertLessEqual(len(calls) - n, 1)                  # thread stopped (at most one in-flight call)
+
+    def test_failed_refresh_keeps_last_good_value_and_records_error(self):
+        import types
+        flip = {"fail": False}
+
+        def refresh(opts):
+            if flip["fail"]:
+                raise RuntimeError("down")
+            return "ok"
+
+        mod = types.SimpleNamespace(INTERVAL=0.01, refresh=refresh)
+        r = Refresher()
+        r.sync([{"handler": "x"}], lambda n: mod)
+        f = r.state[module_key("x", {})]
+        self.assertTrue(self.wait(lambda: f.value == "ok"))
+        flip["fail"] = True
+        self.assertTrue(self.wait(lambda: f.err is not None))
+        self.assertEqual(f.value, "ok")                          # stale value is kept
+        self.assertIsNotNone(f.at)
+        flip["fail"] = False
+        self.assertTrue(self.wait(lambda: f.err is None))
+        r.sync([], None)
+
+    def test_age_text(self):
+        self.assertEqual([age_text(s) for s in (5, 89, 90, 3600, 5400, 7300)], ["5s", "89s", "1m", "60m", "1h", "2h"])
 
 
 if __name__ == "__main__":

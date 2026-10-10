@@ -9,10 +9,14 @@ import re
 REF = re.compile(r"(\w+)\.(x|y|right|bottom)\s*(?:([+-])\s*(\d+))?$")
 
 
+def module_key(name, opts):
+    return (name, json.dumps(opts or {}, sort_keys=True))
+
+
 class Ctx:
     """Everything a handler may draw from; one object instead of a long argument list."""
 
-    def __init__(self, size, fonts, now, mentors, students, parents, status, plan, today, priority, net):
+    def __init__(self, size, fonts, now, mentors, students, parents, status, plan, today, priority, net, data=None):
         self.size = size
         self.font_big, self.font_mid, self.font_sm = fonts
         self.now = now
@@ -20,6 +24,11 @@ class Ctx:
         self.status = status
         self.plan, self.today, self.priority = plan, today, priority
         self.net = net
+        self.data = data or {}
+
+    def fetched(self, name, opts):
+        """Latest background result for a handler's refresh() (a refresh.Fetched), or None."""
+        return self.data.get(module_key(name, opts))
 
 
 _seen = set()

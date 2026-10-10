@@ -283,3 +283,19 @@ def _draw_wifi(surf, cx, base_y, state, bars):
         pygame.draw.arc(surf, c, rect, math.radians(48), math.radians(132), 4)
     if state == "down":
         pygame.draw.line(surf, LTRED, (cx - 24, base_y - 34), (cx + 24, base_y + 6), 4)
+
+
+def age_text(secs):
+    return f"{int(secs)}s" if secs < 90 else f"{int(secs // 60)}m" if secs < 5400 else f"{int(secs // 3600)}h"
+
+
+def draw_freshness(surf, rect, font, f, now, stale_after):
+    """Top-right note on a network-fed panel: nothing while fresh, else how old the data is."""
+    if f is None or f.at is None:
+        text, color = ("no data yet" if f is None or f.err is None else "offline"), MUTED
+    elif f.err or now - f.at > stale_after:
+        text, color = f"{'offline, ' if f.err else ''}updated {age_text(now - f.at)} ago", YELLOW
+    else:
+        return
+    img = font.render(text, True, color)
+    surf.blit(img, (rect.right - 16 - img.get_width(), rect.y + 16))

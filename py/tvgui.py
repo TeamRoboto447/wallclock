@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from attendance import Store, db_path
 from layout import Ctx, LayoutFile, render as render_layout
+from refresh import Refresher
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from netstatus import probe as net_probe
@@ -224,13 +225,15 @@ def kiosk():
     status = "Waiting for reader"
     size = (W, H)
     layouts = LayoutFile()
+    refresher = Refresher()
+    refresher.sync(layouts.get())
     fonts = (font_big, font_mid, font_sm)
 
     def frame():
         return render_layout(
             layouts.get(),
             Ctx(size, fonts, now, mentors, students, parents, status, plan, today_items,
-                priority_items, (net["state"], net["bars"])),
+                priority_items, (net["state"], net["bars"]), refresher.state),
         )
 
     now = int(time.time())
@@ -250,6 +253,7 @@ def kiosk():
         today_mtime,
         priority_mtime,
         layouts.mtime,
+        refresher.version,
         net["state"],
         net["bars"],
     )
@@ -344,7 +348,7 @@ def kiosk():
         plan, plan_mtime = load_plan(plan_path())
         today_items, today_mtime = load_md(today_path())
         priority_items, priority_mtime = load_md(priority_path())
-        layouts.get()  # re-stat the layout file so an edit triggers a redraw
+        refresher.sync(layouts.get())  # re-stat the layout file so an edit triggers a redraw
         new_key = (
             tuple(mentors),
             tuple(students),
@@ -356,6 +360,7 @@ def kiosk():
             today_mtime,
             priority_mtime,
             layouts.mtime,
+            refresher.version,
             net["state"],
             net["bars"],
         )
