@@ -71,7 +71,8 @@ without it you get "piper: no audio" and no sound.
 laptop fake reader) and the next badge tap uses it, for 30 seconds. Armed + tap while clocked in
 moves the person; a plain tap clocks out. Set `TVGUI_REQUIRE_LOCATION=1` on the pit display to refuse
 clock-ins without one; leave it unset on the wall display. Try it:
-`TVGUI_REQUIRE_LOCATION=1 TVGUI_LAYOUT=py/layouts/pit.json scripts/dev.sh`
+`TVGUI_REQUIRE_LOCATION=1 TVGUI_LAYOUT=py/layouts/pit.json scripts/dev.sh`, then in another terminal
+`.venv/bin/python py/tvgui.py location pit` (the default socket is shared, so no env needed; commands that read the DB such as `punches` need `TVGUI_DB=.local/test.sqlite`).
 
 ## Layout
 

@@ -5,7 +5,7 @@ mkdir -p .local
 [ -f kiosk.env ] && { set -a; . ./kiosk.env; set +a; }
 unset LEANTIME_ROLL_FORWARD  # the only path that writes to Leantime
 export TVGUI_FAKE_NFC=1 TVGUI_WINDOWED=1 SDL_AUDIODRIVER=dummy TVGUI_AUDIO_TARGET=
-export TVGUI_DB=$PWD/.local/test.sqlite TVGUI_BOARD=$PWD/.local TVGUI_SOCK=/tmp/tvgui-dev.sock
+export TVGUI_DB=$PWD/.local/test.sqlite TVGUI_BOARD=$PWD/.local
 export TVGUI_PIPER=$PWD/.local/piper/piper
 export TVGUI_PIPER_MODEL=$PWD/.local/piper/en_US-bryce-medium.onnx
 PY=.venv/bin/python
