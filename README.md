@@ -108,6 +108,7 @@ clock-ins without one; leave it unset on the wall display. Try it:
 | `py/layout.py`, `py/layouts/*.json` | Layout = list of modules (position, size, handler); `TVGUI_LAYOUT` picks the file |
 | `py/handlers/*.py` | One file per module: `draw(surf, rect, ctx, opts)`, optional `fit_height` |
 | `py/panels.py` | Colors and the drawing code the handlers use |
+| `py/assets/`, `scripts/prep-assets.py` | Brand art (background, logo, gear strip), rebuilt from `./branding` (a symlink to the Identity folder, not in git) |
 | `py/nfc.py` | pcscd / NDEF / LED |
 | `py/attendance.py` | SQLite toggle in/out, punch corrections |
 | `py/punches.py` | `fix-punch` / `punches` commands |

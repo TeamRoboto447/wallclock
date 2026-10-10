@@ -33,6 +33,7 @@ from refresh import Refresher
 import nexus
 from panels import age_text, border_state, wrap_text
 import slack
+from handlers.image import fit_size
 from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
@@ -809,7 +810,8 @@ class LayoutResolveTests(unittest.TestCase):
             open(p, "w").write('[{"handler": "b"}]')
             os.utime(p, (2, 2))
             self.assertEqual(lf.get(), [{"handler": "b"}])
-            self.assertEqual(LayoutFile(os.path.join(d, "missing.json")).get()[0]["handler"], "title")  # default
+            import json, layout
+            self.assertEqual(LayoutFile(os.path.join(d, "missing.json")).get(), json.load(open(layout.default_path())))  # falls back to the default
 
     def test_broken_handler_only_marks_its_own_rect(self):
         try:
@@ -1086,6 +1088,26 @@ class SlackTests(unittest.TestCase):
         self.assertEqual(edge(30, 1), (LTRED, 0.5))   # flashes
         self.assertEqual(edge(120), (LTRED, 1))
         self.assertEqual(edge(900), (BORDER, 0))
+
+
+class ImageTests(unittest.TestCase):
+    def test_fit_size_contain_and_cover(self):
+        self.assertEqual(fit_size(400, 200, 100, 100), (100, 50))               # contain: whole picture inside
+        self.assertEqual(fit_size(400, 200, 100, 100, "cover"), (200, 100))     # cover: fills the box, overflow cropped
+        self.assertEqual(fit_size(1, 1000, 100, 10), (1, 10))                   # never collapses to zero
+
+    def test_missing_asset_marks_only_its_own_box(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        from layout import Ctx, render as render_layout
+
+        pygame.font.init()
+        f = pygame.font.Font(None, 20)
+        ctx = Ctx((400, 300), (f, f, f), 0, [], [], [], "", {}, [], [], ("ok", 3))
+        layout = [{"handler": "image", "x": 0, "y": 0, "w": 100, "h": 100, "opts": {"file": "no-such-file.png"}}]
+        self.assertEqual(render_layout(layout, ctx).get_size(), (400, 300))   # no exception
 
 
 if __name__ == "__main__":

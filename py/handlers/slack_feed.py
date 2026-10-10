@@ -4,7 +4,7 @@ opts: channel (default $TVGUI_SLACK_CHANNEL), title, limit."""
 import pygame
 
 import slack
-from panels import (BEIGE, BLUE, BORDER, CORAL, INK, LTRED, MUTED, PANEL, age_text, border_state, draw_freshness,
+from panels import (BEIGE, BLUE, BORDER, CORAL, INK, LTRED, MUTED, age_text, border_state, draw_freshness, panel_bg,
                     wrap_text)
 
 INTERVAL = 15
@@ -17,7 +17,7 @@ def refresh(opts):
 def draw(surf, rect, ctx, opts):
     f = ctx.fetched("slack_feed", opts)
     msgs = (f.value if f else None) or []
-    pygame.draw.rect(surf, PANEL, rect)
+    panel_bg(surf, rect)
     surf.blit(ctx.font_sm.render(opts.get("title", "Important Team Communications"), True, BEIGE), (rect.x + 20, rect.y + 16))
     draw_freshness(surf, rect, ctx.font_sm, f, ctx.now, 3 * INTERVAL)
     y = rect.y + 56

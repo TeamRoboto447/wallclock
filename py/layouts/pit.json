@@ -1,7 +1,9 @@
 [
-  {"handler": "title", "x": 24, "y": 24, "w": 400, "h": 40},
-  {"id": "here", "handler": "here", "x": 24, "y": 80, "w": "fit", "max_w": 560, "h": 812, "opts": {"group_by": "location", "times": false, "locations": ["pit", "practice field", "stands", "field", "cafeteria"]}},
-  {"id": "next", "handler": "nexus_next", "x": "here.right+24", "y": 80, "right": 1896, "h": 96},
+  {"handler": "image", "x": 0, "y": 0, "w": 1920, "h": 1080, "opts": {"file": "background.jpg", "fit": "cover"}},
+  {"handler": "image", "x": 24, "y": 8, "w": 160, "h": 88, "opts": {"file": "logo.png"}},
+  {"handler": "image", "x": 196, "y": 20, "w": 1700, "h": 64, "opts": {"file": "strip.jpg", "fit": "cover"}},
+  {"id": "here", "handler": "here", "x": 24, "y": 104, "w": "fit", "max_w": 560, "h": 788, "opts": {"group_by": "location", "times": false, "locations": ["pit", "practice field", "stands", "field", "cafeteria"]}},
+  {"id": "next", "handler": "nexus_next", "x": "here.right+24", "y": 104, "right": 1896, "h": 96},
   {"id": "parts", "handler": "nexus_feed", "x": "here.right+24", "y": "next.bottom+24", "w": 560, "h": 334, "opts": {"kind": "parts"}},
   {"id": "sched", "handler": "nexus_schedule", "x": "parts.right+24", "y": "next.bottom+24", "right": 1896, "h": 334},
   {"id": "ann", "handler": "nexus_feed", "x": "here.right+24", "y": "parts.bottom+24", "w": 560, "bottom": 892, "opts": {"kind": "announcements"}},

@@ -2,7 +2,7 @@
 import pygame
 
 import nexus
-from panels import BEIGE, BLUE, CORAL, INK, LTRED, MUTED, PANEL, draw_freshness
+from panels import panel_bg, BEIGE, BLUE, CORAL, INK, LTRED, MUTED, draw_freshness
 
 INTERVAL = 15
 SEP = "  ·  "
@@ -13,7 +13,7 @@ def refresh(opts):
 
 
 def draw(surf, rect, ctx, opts):
-    pygame.draw.rect(surf, PANEL, rect)
+    panel_bg(surf, rect)
     team = nexus.team(opts)
     title = opts.get("title") or "next match" + (f" (team {team})" if team else "")
     surf.blit(ctx.font_sm.render(title, True, BEIGE), (rect.x + 20, rect.y + 16))

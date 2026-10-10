@@ -5,22 +5,23 @@ import math
 from attendance import year_start
 
 FONT = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
-BG = (0x22, 0x22, 0x22)
+BG = (0x0B, 0x0A, 0x1E)
 RED = (0xB5, 0x04, 0x04)
 CORAL = (0xD8, 0x61, 0x3C)
-BEIGE = (0xCF, 0xCA, 0xBE)
+BEIGE = (0xD6, 0xD9, 0xE8)
 INK = (0xF9, 0xF9, 0xF9)
 GREEN = (0x5F, 0xD3, 0x7A)
 BLUE = (0x4A, 0x9E, 0xE0)
 YELLOW = (0xE6, 0xB4, 0x22)
 LTRED = (0xE5, 0x48, 0x4D)
 STATUS_COLOR = {"new": BLUE, "wip": YELLOW, "blocked": LTRED, "done": GREEN}
-MUTED = (0x6A, 0x6A, 0x62)
+MUTED = (0x8A, 0x8C, 0xA8)
 MD_MARK = {"more": ("", MUTED), "todo": ("[ ]", BLUE), "wip": ("[~]", YELLOW), "blocked": ("[!]", LTRED), "done": ("[x]", GREEN)}
-PANEL = (0x1A, 0x1A, 0x1A)
-BORDER = (0x3A, 0x3A, 0x3A)
-GRID = (0x2A, 0x2A, 0x2A)
-STATUS_BG = (0x3A, 0x0A, 0x0A)
+PANEL = (0x0E, 0x0D, 0x24)
+PANEL_ALPHA = 215  # panels are translucent so the background art shows through
+BORDER = (0x4B, 0x43, 0xB0)
+GRID = (0x2C, 0x2A, 0x5A)
+STATUS_BG = (0x1C, 0x08, 0x5A)
 CYCLE_SECS = 10
 GANTT_HEAD_H = 64
 GANTT_ROW_H = 32
@@ -56,7 +57,7 @@ def _clip_blit(surf, img, pos, rect):
 def _draw_md(surf, rect, title, items, font_mid, font_sm):
     import pygame
 
-    pygame.draw.rect(surf, PANEL, rect)
+    panel_bg(surf, rect)
     surf.blit(font_sm.render(title, True, BEIGE), (rect.x + 20, rect.y + 16))
     y = rect.y + 52
     x = rect.x + 20
@@ -90,7 +91,7 @@ def _draw_here(surf, rect, groups, font_sm, now, times=True):
     """groups: [(heading, rows)], rows = (name, ts, enabled, closed_secs, ...)."""
     import pygame
 
-    pygame.draw.rect(surf, PANEL, rect)
+    panel_bg(surf, rect)
     surf.blit(font_sm.render("who's here", True, BEIGE), (rect.x + 20, rect.y + 16))
     total_r = rect.right - 20
     meet_r = total_r - 100
@@ -144,7 +145,7 @@ def today_offset_weeks(start, weeks, now):
 def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
     import pygame
 
-    pygame.draw.rect(surf, PANEL, rect)
+    panel_bg(surf, rect)
     title = plan.get("title") or "plan"
     surf.blit(font_sm.render(title, True, BEIGE), (rect.x + 16, rect.y + 12))
     weeks = max(1, int(plan.get("weeks") or 8))
@@ -333,3 +334,18 @@ def wrap_text(font, text, max_w):
 def border_state(age_secs):
     """Urgency of the newest Slack message: thick flashing border under 1 min, red under 5, else idle."""
     return "flash" if age_secs < 60 else "red" if age_secs < 300 else "idle"
+
+
+_shells = {}
+
+
+def panel_bg(surf, rect, color=PANEL, alpha=PANEL_ALPHA):
+    """Translucent panel fill with a thin brand-blue outline."""
+    import pygame
+
+    key = (rect.size, color, alpha)
+    if key not in _shells:
+        _shells[key] = pygame.Surface(rect.size, pygame.SRCALPHA)
+        _shells[key].fill((*color, alpha))
+    surf.blit(_shells[key], rect.topleft)
+    pygame.draw.rect(surf, BORDER, rect, 1)

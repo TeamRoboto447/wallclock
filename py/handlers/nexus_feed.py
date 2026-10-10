@@ -2,7 +2,7 @@
 import pygame
 
 import nexus
-from panels import BEIGE, CORAL, INK, MUTED, PANEL, age_text, clip_text, draw_freshness
+from panels import panel_bg, BEIGE, CORAL, INK, MUTED, age_text, clip_text, draw_freshness
 
 INTERVAL = 15
 KINDS = {  # kind -> (event key, title, row text)
@@ -17,7 +17,7 @@ def refresh(opts):
 
 def draw(surf, rect, ctx, opts):
     field, title, row = KINDS[opts["kind"]]
-    pygame.draw.rect(surf, PANEL, rect)
+    panel_bg(surf, rect)
     surf.blit(ctx.font_sm.render(opts.get("title", title), True, BEIGE), (rect.x + 20, rect.y + 16))
     f = ctx.fetched("nexus_feed", opts)
     draw_freshness(surf, rect, ctx.font_sm, f, ctx.now, 3 * INTERVAL)
