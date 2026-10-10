@@ -56,6 +56,11 @@ class PendingLocation:
             t.daemon = True
             t.start()
 
+    def peek(self, now=None):
+        """The armed location while it is still valid, without using it up."""
+        with self.lock:
+            return self.loc if self.loc and (time.time() if now is None else now) < self.until else None
+
     def take(self, now=None):
         with self.lock:
             loc, until, self.loc = self.loc, self.until, None
@@ -72,10 +77,49 @@ class PendingLocation:
 PENDING = PendingLocation()
 
 
+class AdminLock:
+    """The Stream Deck's admin page: its ADMIN key arms this, the next mentor badge tap opens it."""
+
+    ARM_SECS, IDLE_SECS = 15, 60
+
+    def __init__(self):
+        self.armed_until = 0
+        self.open_until = 0
+
+    def arm(self, now=None):
+        self.armed_until = (time.time() if now is None else now) + self.ARM_SECS
+
+    def waiting(self, now=None):
+        return (time.time() if now is None else now) < self.armed_until
+
+    def touch(self, now=None):  # every admin key press keeps the page open
+        self.open_until = (time.time() if now is None else now) + self.IDLE_SECS
+
+    def unlock(self, now=None):
+        self.armed_until = 0
+        self.touch(now)
+
+    def is_open(self, now=None):
+        return (time.time() if now is None else now) < self.open_until
+
+    def close(self):
+        self.open_until = 0
+
+
+ADMIN = AdminLock()
+
+
 def tap(store, member, now):
     """One badge tap -> (punch or None, note or None). A location armed beforehand tags a clock-in or,
     for someone already in, moves them instead of clocking out. With TVGUI_REQUIRE_LOCATION=1 a
-    clock-in without one is refused (the pit display; the wall display leaves it off)."""
+    clock-in without one is refused (the pit display; the wall display leaves it off). While the
+    Stream Deck waits for an admin unlock the tap is consumed by that instead."""
+    if ADMIN.waiting(now):  # a badge tap while the deck waits for a mentor opens admin and never punches
+        known = store.get(member.username)
+        if known and known.role == Role.MENTOR:
+            ADMIN.unlock(now)
+            return None, f"Admin unlocked by {known.name}"
+        return None, "Admin needs a mentor badge"
     loc = PENDING.take()
     inside = store.is_in(member.username)
     if inside and loc:

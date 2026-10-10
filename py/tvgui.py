@@ -9,11 +9,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from attendance import Store, db_path
-from layout import Ctx, LayoutFile, render as render_layout
+from layout import Ctx, LayoutFile, next_layout, render as render_layout
 from refresh import Refresher
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from netstatus import probe as net_probe
+from deck import start as deck_start
 from nfc import EnrollSlot, split_here, start as nfc_start
 from punches import fix_punch, list_punches
 from plan import load_md, load_plan, plan_path, priority_path, today_path
@@ -277,6 +278,7 @@ def kiosk():
         target=listen, args=(socket_path(), slot, events, state), daemon=True
     ).start()
     nfc_start(store, slot, events)
+    deck_start(store, state, events)
     clock = pygame.time.Clock()
     running = True
     while running:
@@ -312,6 +314,13 @@ def kiosk():
                     threading.Thread(
                         target=play_greet, args=(item[1], item[2]), daemon=True
                     ).start()
+                    woke = True
+                elif kind == "layout_next":
+                    layouts.use(next_layout(layouts.path))
+                    status = f"Layout: {os.path.splitext(os.path.basename(layouts.path))[0]}"
+                    woke = True
+                elif kind == "info":
+                    status = f"{os.path.splitext(os.path.basename(layouts.path))[0]} layout · {len(store.who())} here · {os.path.basename(db_path())}"
                     woke = True
                 elif kind == "blank":
                     blanked = True

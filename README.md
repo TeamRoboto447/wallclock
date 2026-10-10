@@ -90,6 +90,19 @@ install it to the workspace, then `/invite @Pit Display` in the channel.
 Without a workspace, try it offline: `TVGUI_SLACK_FIXTURE=file.json` with `{"messages": [{"ts": "<unix>", "user": "U1", "text": "hi"}], "users": {"U1": "Dana"}}`.
 Only mentions, links and `&amp;`-style escapes are cleaned up; bold, code, emoji and threads are not rendered.
 
+## Stream Deck (pit display)
+
+Optional. The kiosk starts a Stream Deck thread when the `streamdeck` + `PIL` packages and a deck are present (silently idle
+otherwise; `TVGUI_NO_DECK=1` turns it off). Laptop: `.venv/bin/pip install streamdeck pillow` (and `hidapi`). Pi:
+`setup-pi.sh` installs `python3-elgato-streamdeck python3-pil libhidapi-libusb0` and `deploy/60-streamdeck.rules` (untested on the Pi).
+
+- **Top-row keys = locations** (`TVGUI_DECK_LOCATIONS`, default `pit,practice field,stands,field,cafeteria`, must match the layout's list)
+  showing the head-count. Press one, then badge within 30 s.
+- **Bottom-right key = ADMIN.** Press it, then a *mentor* taps their badge (no punch happens); the admin page opens for 60 s of idle time.
+  Keys: clock everyone out (press twice within 5 s), next layout, screen on/off, audio test, info (status bar), require-location on/off,
+  brightness, back. Admin presses are logged (`admin: ...`).
+- Preview the key images without hardware: `.venv/bin/python py/deck.py sheet /tmp/decksheet.png`.
+
 ## Locations (pit display)
 
 `py/layouts/pit.json` groups who's-here by location instead of role. A location is armed first

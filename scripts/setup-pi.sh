@@ -11,7 +11,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   pcscd libccid \
   pipewire pipewire-pulse wireplumber \
   libegl1 libgles2 \
-  fonts-freefont-ttf
+  fonts-freefont-ttf \
+  python3-elgato-streamdeck python3-pil libhidapi-libusb0
 
 sudo mkdir -p /usr/local/share/tvgui /var/lib/tvgui /etc/X11 /etc/tvgui
 sudo cp "$ROOT/py/"*.py "$ROOT/py/xsession.sh" /usr/local/share/tvgui/
@@ -28,6 +29,7 @@ sudo cp "$ROOT/deploy/pw-hdmi-hold.service" /etc/systemd/system/pw-hdmi-hold.ser
 sudo cp "$ROOT/deploy/blacklist-pn533.conf" /etc/modprobe.d/
 sudo sed -i 's/^AudioOutputMethod .*/AudioOutputMethod "pipewire"/' /etc/speech-dispatcher/speechd.conf
 sudo cp "$ROOT/deploy/50-pcscd.rules" /etc/polkit-1/rules.d/
+sudo cp "$ROOT/deploy/60-streamdeck.rules" /etc/udev/rules.d/ && sudo udevadm control --reload-rules
 printf "allowed_users=anybody\nneeds_root_rights=yes\n" | sudo tee /etc/X11/Xwrapper.config >/dev/null
 if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then
   sudo adduser --gecos "FRC lvuser" --disabled-password "$KIOSK_USER"

@@ -2,6 +2,7 @@
 x/y/w/h are px, or "<id>.<edge>[+/-n]" (edge: x y right bottom) naming an EARLIER module,
 so the list resolves top to bottom with no cycles. h="fit" / w="fit" ask the handler's fit_height() / fit_width()
 (capped by max_h / max_w)."""
+import glob
 import importlib
 import json
 import os
@@ -51,6 +52,13 @@ def default_path():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "layouts", "wall.json")
 
 
+def next_layout(path):
+    """The next layouts/*.json after `path`, wrapping around."""
+    files = sorted(glob.glob(os.path.join(os.path.dirname(default_path()), "*.json")))
+    cur = os.path.abspath(path)
+    return files[(files.index(cur) + 1) % len(files)] if cur in files else files[0]
+
+
 def layout_path():
     return os.environ.get("TVGUI_LAYOUT") or default_path()
 
@@ -65,6 +73,11 @@ class LayoutFile:
         self.mtime = None
         self._bad = None
         self.get()
+
+    def use(self, path):
+        """Switch to another layout file; a bad one keeps the layout that is showing."""
+        self.path, self.mtime, self._bad = path, None, None
+        return self.get()
 
     def get(self):
         try:

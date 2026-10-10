@@ -26,7 +26,9 @@ from sync_leantime import (
 )
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
-from nfc import PENDING, _run_fake, split_here, tap
+from nfc import ADMIN, PENDING, _run_fake, split_here, tap
+from deck import Deck, render as render_key
+from layout import next_layout
 from handlers.here import fit_width, groups as here_groups
 from layout import LayoutFile, module_key, resolve
 from refresh import Refresher
@@ -1147,6 +1149,116 @@ class RosterOverflowTests(unittest.TestCase):
                    lambda s, r: _draw_here_flow(s, r, gs, f)):
             surf = pygame.Surface((700, 800))
             fn(surf, pygame.Rect(10, 10, 616, 788))
+
+
+class DeckTests(unittest.TestCase):
+    def setUp(self):
+        import queue
+        import threading
+        ADMIN.armed_until = ADMIN.open_until = 0
+        PENDING.loc = None
+        self.store = Store(":memory:")
+        self.q = queue.Queue()
+        self.state = {"lock": threading.Lock(), "mentors": [], "students": [], "parents": [], "blanked": False}
+        self.deck = Deck(self.store, self.state, self.q, ["pit", "stands"])
+        self.mentor = Member("Ann", "ann", "Ann", Role.MENTOR)
+        self.kid = Member("Kid", "kid", "Kid", Role.STUDENT)
+        for m in (self.mentor, self.kid):
+            self.store.upsert(m)
+
+    def events(self):
+        out = []
+        while not self.q.empty():
+            out.append(self.q.get_nowait())
+        return out
+
+    def test_location_keys_show_counts_and_the_armed_one(self):
+        self.state["students"] = [("a", 0, False, 0, "pit"), ("b", 0, False, 0, "pit"), ("c", 0, False, 0, "stands")]
+        keys = self.deck.keys(1000)
+        self.assertEqual([(k[0], k[1]) for k in keys[:2]], [("pit", "2"), ("stands", "1")])
+        self.assertEqual(keys[14][0], "ADMIN")
+        self.deck.press(1, 1000)
+        self.assertEqual(self.deck.keys(1001)[1][1], "TAP BADGE")
+        self.assertEqual(PENDING.peek(), "stands")
+
+    def test_admin_opens_only_for_a_mentor_and_nobody_is_punched(self):
+        self.deck.press(14, 1000)
+        self.assertEqual(self.deck.keys(1001)[14][:2], ("TAP", "MENTOR"))
+        self.assertEqual(tap(self.store, self.kid, 1002), (None, "Admin needs a mentor badge"))
+        self.assertEqual(tap(self.store, Member("Who", "who", "Who", Role.MENTOR), 1003)[1], "Admin needs a mentor badge")  # unknown
+        self.assertFalse(ADMIN.is_open(1003))
+        punch, note = tap(self.store, self.mentor, 1004)
+        self.assertEqual((punch, note), (None, "Admin unlocked by Ann"))
+        self.assertEqual(self.store.who(), [])                                   # no punches at all
+        self.assertEqual(self.deck.keys(1005)[14][0], "BACK")
+        self.assertTrue(ADMIN.is_open(1004 + ADMIN.IDLE_SECS - 1))
+        self.assertFalse(ADMIN.is_open(1004 + ADMIN.IDLE_SECS))                  # idle timeout
+        ADMIN.arm(2000)
+        self.assertFalse(ADMIN.waiting(2000 + ADMIN.ARM_SECS))                   # the mentor window expires too
+
+    def open_admin(self, now=1000):
+        ADMIN.unlock(now)
+
+    def test_clock_out_all_needs_a_second_press_within_five_seconds(self):
+        for i, m in enumerate((self.mentor, self.kid)):
+            self.store.toggle(m, 100 + i, 0, location="pit")
+        self.open_admin()
+        self.deck.press(0, 1001)
+        self.assertEqual(self.deck.keys(1002)[0][0], "CONFIRM?")
+        self.assertEqual(len(self.store.who()), 2)                                # first press changes nothing
+        self.deck.press(0, 1001 + 6)                                              # too late: asks again
+        self.assertEqual(len(self.store.who()), 2)
+        self.deck.press(0, 1008)
+        self.assertEqual(self.store.who(), [])
+        self.assertIn(("status", "2 people clocked out"), self.events())
+
+    def test_another_key_cancels_the_confirmation(self):
+        self.store.toggle(self.kid, 100, 0)
+        self.open_admin()
+        self.deck.press(0, 1001)
+        self.deck.press(3, 1002)                                                  # audio test
+        self.deck.press(0, 1003)                                                  # asks again, does not clock out
+        self.assertEqual(len(self.store.who()), 1)
+
+    def test_other_admin_keys_post_events_and_back_closes(self):
+        self.open_admin()
+        for i in (1, 3, 4):
+            self.deck.press(i, 1001)
+        self.deck.press(2, 1001)
+        self.state["blanked"] = True
+        self.deck.press(2, 1001)
+        self.assertEqual(self.events(), [("layout_next",), ("speak", "Audio test"), ("info",), ("blank",), ("unblank",)])
+        self.deck.press(6, 1001)
+        self.assertEqual(self.deck.brightness, 100)
+        self.deck.press(14, 1001)
+        self.assertEqual(self.deck.keys(1002)[14][0], "ADMIN")                    # back on the main page
+
+    def test_next_layout_wraps_and_layout_file_switches(self):
+        import json, layout
+        first = next_layout("nonexistent.json")
+        seen = [first]
+        for _ in range(10):
+            nxt = next_layout(seen[-1])
+            if nxt == first:
+                break
+            seen.append(nxt)
+        self.assertGreaterEqual(len(seen), 2)                                      # wall + pit at least
+        with tempfile.TemporaryDirectory() as d:
+            lf = layout.LayoutFile(seen[0])
+            bad = os.path.join(d, "bad.json")
+            open(bad, "w").write("{nope")
+            good = lf.get()
+            self.assertEqual(lf.use(bad), good)                                    # a bad layout keeps the one showing
+            self.assertEqual(lf.use(seen[1]), json.load(open(seen[1])))
+
+    def test_key_images_render(self):
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            self.skipTest("PIL not installed")
+        for spec in self.deck.keys(1000) + [("CLOCK OUT", "all 7", (1, 2, 3), (255, 255, 255))]:
+            if spec:
+                self.assertEqual(render_key(spec).size, (72, 72))
 
 
 if __name__ == "__main__":
