@@ -230,12 +230,15 @@ def kiosk():
     refresher.sync(layouts.get())
     fonts = (font_big, font_mid, font_sm)
 
+    ticking = 0  # redraw interval a module asked for in the last frame (flashing borders), 0 = none
+
     def frame():
-        return render_layout(
-            layouts.get(),
-            Ctx(size, fonts, now, mentors, students, parents, status, plan, today_items,
-                priority_items, (net["state"], net["bars"]), refresher.state),
-        )
+        nonlocal ticking
+        ctx = Ctx(size, fonts, now, mentors, students, parents, status, plan, today_items,
+                  priority_items, (net["state"], net["bars"]), refresher.state, int(time.monotonic() * 2))
+        surf = render_layout(layouts.get(), ctx)
+        ticking = ctx.tick
+        return surf
 
     now = int(time.time())
     plan, plan_mtime = load_plan(plan_path())
@@ -255,6 +258,7 @@ def kiosk():
         priority_mtime,
         layouts.mtime,
         refresher.version,
+        int(time.monotonic() / ticking) if ticking else 0,
         net["state"],
         net["bars"],
     )
@@ -362,6 +366,7 @@ def kiosk():
             priority_mtime,
             layouts.mtime,
             refresher.version,
+            int(time.monotonic() / ticking) if ticking else 0,
             net["state"],
             net["bars"],
         )

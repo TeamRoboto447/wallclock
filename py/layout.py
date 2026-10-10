@@ -17,7 +17,7 @@ def module_key(name, opts):
 class Ctx:
     """Everything a handler may draw from; one object instead of a long argument list."""
 
-    def __init__(self, size, fonts, now, mentors, students, parents, status, plan, today, priority, net, data=None):
+    def __init__(self, size, fonts, now, mentors, students, parents, status, plan, today, priority, net, data=None, beat=0):
         self.size = size
         self.font_big, self.font_mid, self.font_sm = fonts
         self.now = now
@@ -26,6 +26,11 @@ class Ctx:
         self.plan, self.today, self.priority = plan, today, priority
         self.net = net
         self.data = data or {}
+        self.beat = beat  # flips every 0.5 s, for flashing
+        self.tick = 0  # redraw this often (seconds) while something animates; see want_tick
+
+    def want_tick(self, secs):
+        self.tick = secs if not self.tick else min(self.tick, secs)
 
     def fetched(self, name, opts):
         """Latest background result for a handler's refresh() (a refresh.Fetched), or None."""

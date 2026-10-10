@@ -31,7 +31,8 @@ from handlers.here import fit_width, groups as here_groups
 from layout import LayoutFile, module_key, resolve
 from refresh import Refresher
 import nexus
-from panels import age_text
+from panels import age_text, border_state, wrap_text
+import slack
 from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
@@ -998,6 +999,93 @@ class FitWidthTests(unittest.TestCase):
             self.assertEqual((nexus.team({"team": "800"}), nexus.event_key({"event": "ev2"})), ("800", "ev2"))
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertIsNone(nexus.team({}))
+
+
+class SlackTests(unittest.TestCase):
+    def setUp(self):
+        slack._names.clear()
+
+    def fake(self, history, users=None, calls=None):
+        def get(method, **p):
+            if calls is not None:
+                calls.append(method)
+            if method == "conversations.history":
+                return {"messages": history}
+            if users is None:
+                raise RuntimeError("missing_scope")
+            return {"user": {"real_name": users[p["user"]]}}
+        return get
+
+    def test_clean_mentions_links_and_entities(self):
+        name = lambda u: {"U1": "Ana"}.get(u, "someone")
+        self.assertEqual(slack.clean("hi <@U1> see <https://x.org/a/b|the doc> or <https://y.org/p> in <#C1|pit> <!here> a &amp; b &lt;3", name),
+                         "hi @Ana see the doc or y.org in #pit @here a & b <3")
+
+    def test_messages_filter_name_cache_and_fallbacks(self):
+        hist = [
+            {"ts": "100.0", "user": "U1", "text": "old"},
+            {"ts": "300.0", "user": "U1", "text": "newest <@U2>"},
+            {"ts": "250.0", "subtype": "channel_join", "user": "U2", "text": "joined"},
+            {"ts": "260.0", "user": "U2", "text": "reply", "thread_ts": "100.0"},
+            {"ts": "280.0", "user": "U2", "text": "", "files": [{}]},
+            {"ts": "290.0", "bot_id": "B1", "username": "deploybot", "text": "", "attachments": [{"fallback": "build ok"}]},
+        ]
+        calls = []
+        self.assertEqual(len(slack.messages(None, 15, self.fake(hist, {"U1": "Ana", "U2": "Bo"}))), 4)  # no channel needed offline
+        slack._names.clear()
+        out = slack.messages("C1", 15, self.fake(hist, {"U1": "Ana", "U2": "Bo"}, calls))
+        self.assertEqual([(m["author"], m["text"]) for m in out],
+                         [("Ana", "newest @Bo"), ("deploybot", "build ok"), ("Bo", "[file]"), ("Ana", "old")])
+        self.assertEqual(calls.count("users.info"), 2)  # each user looked up once
+
+    def test_missing_users_scope_degrades_and_api_errors_raise(self):
+        out = slack.messages("C1", 15, self.fake([{"ts": "1", "user": "U1", "text": "x"}]))
+        self.assertEqual(out[0]["author"], "someone")
+
+        def bad(method, **p):
+            raise RuntimeError("not_in_channel")
+        with self.assertRaises(RuntimeError):
+            slack.messages("C1", 15, bad)
+        import unittest.mock as mock
+        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(RuntimeError, "TVGUI_SLACK_CHANNEL"):
+            slack.messages(None, 15, slack.call)
+
+    def test_wrap_text_and_border_state(self):
+        class F:
+            @staticmethod
+            def size(t):
+                return (10 * len(t), 20)
+        self.assertEqual(wrap_text(F, "aaa bbb ccc dd", 70), ["aaa bbb", "ccc dd"])
+        self.assertEqual(wrap_text(F, "x" * 25, 100), ["x" * 10, "x" * 10, "x" * 5])
+        self.assertEqual([border_state(a) for a in (0, 59, 60, 299, 300, 9000)], ["flash", "flash", "red", "red", "idle", "idle"])
+
+    def test_border_colors_by_age(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        import time
+        from layout import Ctx, module_key
+        from refresh import Fetched
+        import handlers.slack_feed as feed
+        from panels import BLUE, BORDER, LTRED
+
+        pygame.font.init()
+        f = pygame.font.Font(None, 24)
+        rect = pygame.Rect(10, 10, 300, 200)
+
+        def edge(age, beat=0):
+            fetched = Fetched()
+            fetched.value, fetched.at = [{"ts": 1000.0 - age, "author": "Ana", "text": "hello pit"}], time.time()
+            ctx = Ctx((400, 300), (f, f, f), 1000, [], [], [], "", {}, [], [], ("ok", 3), {module_key("slack_feed", {}): fetched}, beat)
+            surf = pygame.Surface((400, 300))
+            feed.draw(surf, rect, ctx, {})
+            return tuple(surf.get_at((rect.x + 1, rect.centery)))[:3], ctx.tick
+
+        self.assertEqual(edge(30, 0), (BLUE, 0.5))
+        self.assertEqual(edge(30, 1), (LTRED, 0.5))   # flashes
+        self.assertEqual(edge(120), (LTRED, 1))
+        self.assertEqual(edge(900), (BORDER, 0))
 
 
 if __name__ == "__main__":

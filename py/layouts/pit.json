@@ -5,6 +5,7 @@
   {"id": "parts", "handler": "nexus_feed", "x": "here.right+24", "y": "next.bottom+24", "w": 560, "h": 334, "opts": {"kind": "parts"}},
   {"id": "sched", "handler": "nexus_schedule", "x": "parts.right+24", "y": "next.bottom+24", "right": 1896, "h": 334},
   {"id": "ann", "handler": "nexus_feed", "x": "here.right+24", "y": "parts.bottom+24", "w": 560, "bottom": 892, "opts": {"kind": "announcements"}},
+  {"id": "slack", "handler": "slack_feed", "x": "ann.right+24", "y": "sched.bottom+24", "right": 1896, "bottom": 892},
   {"handler": "status", "x": 24, "y": 916, "w": 1872, "h": 140},
   {"handler": "clock", "x": 24, "y": 916, "w": 1872, "h": 140}
 ]

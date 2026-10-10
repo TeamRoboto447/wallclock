@@ -70,6 +70,26 @@ without it you get "piper: no audio" and no sound.
 schedule and next-match modules show only its matches) go in `kiosk.env`. `scripts/dev.sh` defaults the last two to the
 demo event and team 800 unless `kiosk.env` sets them.
 
+## Slack: Important Team Communications (pit display)
+
+The `slack_feed` module shows the newest messages of one Slack channel, newest first. Its border shows how fresh the newest
+one is: flashing blue/red under 1 minute, solid red under 5, a thin gray outline otherwise. Anything posted in that
+channel appears on the screen.
+
+Setup (one time, needs a Slack admin): create an internal app from this manifest (untested here, adjust in the Slack UI if it is rejected),
+install it to the workspace, then `/invite @Pit Display` in the channel.
+
+```json
+{"display_information": {"name": "Pit Display"},
+ "features": {"bot_user": {"display_name": "Pit Display", "always_online": false}},
+ "oauth_config": {"scopes": {"bot": ["channels:history", "groups:history", "users:read"]}},
+ "settings": {"org_deploy_enabled": false, "socket_mode_enabled": false, "token_rotation_enabled": false}}
+```
+
+`kiosk.env` gets `SLACK_BOT_TOKEN=xoxb-...` and `TVGUI_SLACK_CHANNEL=C0123456789` (the channel ID: channel details, bottom of the About tab).
+Without a workspace, try it offline: `TVGUI_SLACK_FIXTURE=file.json` with `{"messages": [{"ts": "<unix>", "user": "U1", "text": "hi"}], "users": {"U1": "Dana"}}`.
+Only mentions, links and `&amp;`-style escapes are cleaned up; bold, code, emoji and threads are not rendered.
+
 ## Locations (pit display)
 
 `py/layouts/pit.json` groups who's-here by location instead of role. A location is armed first

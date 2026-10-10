@@ -306,3 +306,30 @@ def clip_text(font, text, max_w):
     while len(text) > 1 and font.size(text + "…")[0] > max_w:
         text = text[:-1]
     return text.rstrip() + "…"
+
+
+def wrap_text(font, text, max_w):
+    """Word-wrap text into lines no wider than max_w (an over-long word is split)."""
+    lines, line = [], ""
+    for word in text.split():
+        while font.size(word)[0] > max_w and len(word) > 1:  # split a word wider than the box
+            cut = len(word) - 1
+            while cut > 1 and font.size(word[:cut])[0] > max_w:
+                cut -= 1
+            if line:
+                lines.append(line)
+                line = ""
+            lines.append(word[:cut])
+            word = word[cut:]
+        trial = f"{line} {word}".strip()
+        if line and font.size(trial)[0] > max_w:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    return lines + ([line] if line else [])
+
+
+def border_state(age_secs):
+    """Urgency of the newest Slack message: thick flashing border under 1 min, red under 5, else idle."""
+    return "flash" if age_secs < 60 else "red" if age_secs < 300 else "idle"
