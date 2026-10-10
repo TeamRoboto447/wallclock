@@ -1,0 +1,9 @@
+[
+  {"handler": "title", "x": 24, "y": 24, "w": 400, "h": 40},
+  {"handler": "here", "x": 24, "y": 80, "w": 456, "h": 812},
+  {"handler": "nexus_next", "x": 504, "y": 80, "w": 1392, "h": 260, "opts": {"event": "demo1509", "team": "800", "title": "next match (team 800)"}},
+  {"handler": "nexus_schedule", "x": 504, "y": 364, "w": 684, "bottom": 892, "opts": {"event": "demo1509", "title": "match schedule"}},
+  {"handler": "md", "x": 1212, "y": 364, "w": 684, "bottom": 892, "opts": {"source": "priority", "title": "priority"}},
+  {"handler": "status", "x": 24, "y": 916, "w": 1872, "h": 140},
+  {"handler": "clock", "x": 24, "y": 916, "w": 1872, "h": 140}
+]

@@ -29,6 +29,7 @@ from tvgui import enabled_status, newly_enabled
 from nfc import _run_fake, split_here
 from layout import LayoutFile, module_key, resolve
 from refresh import Refresher
+import nexus
 from panels import age_text
 from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
@@ -882,6 +883,23 @@ class RefreshTests(unittest.TestCase):
 
     def test_age_text(self):
         self.assertEqual([age_text(s) for s in (5, 89, 90, 3600, 5400, 7300)], ["5s", "89s", "1m", "60m", "1h", "2h"])
+
+
+class NexusTests(unittest.TestCase):
+    def match(self, label, start_min, red=("1",), blue=("2",)):
+        return {"label": label, "redTeams": list(red), "blueTeams": list(blue),
+                "times": {"estimatedStartTime": start_min * 60_000}}
+
+    def test_upcoming_drops_old_matches_and_filters_by_team(self):
+        ms = [self.match("old", 0), self.match("now", 100), self.match("mine", 120, red=("447",)), self.match("later", 200)]
+        now = 103 * 60_000
+        self.assertEqual([m["label"] for m in nexus.upcoming(ms, now)], ["now", "mine", "later"])  # 'old' ended
+        self.assertEqual([m["label"] for m in nexus.upcoming(ms, now, "447")], ["mine"])
+        self.assertEqual(nexus.upcoming([{"label": "no times"}], now), [])
+
+    def test_eta_text(self):
+        m = 60_000
+        self.assertEqual([nexus.eta_text(t * m, 0) for t in (-3, 0, 12, 89, 125)], ["now", "now", "12 min", "89 min", "2h 05m"])
 
 
 if __name__ == "__main__":
