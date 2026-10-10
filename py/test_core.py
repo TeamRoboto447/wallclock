@@ -886,16 +886,16 @@ class RefreshTests(unittest.TestCase):
 
 
 class NexusTests(unittest.TestCase):
-    def match(self, label, start_min, red=("1",), blue=("2",)):
-        return {"label": label, "redTeams": list(red), "blueTeams": list(blue),
-                "times": {"estimatedStartTime": start_min * 60_000}}
+    def match(self, label, status, red=("1",), blue=("2",)):
+        return {"label": label, "status": status, "redTeams": list(red), "blueTeams": list(blue), "times": {}}
 
-    def test_upcoming_drops_old_matches_and_filters_by_team(self):
-        ms = [self.match("old", 0), self.match("now", 100), self.match("mine", 120, red=("447",)), self.match("later", 200)]
-        now = 103 * 60_000
-        self.assertEqual([m["label"] for m in nexus.upcoming(ms, now)], ["now", "mine", "later"])  # 'old' ended
-        self.assertEqual([m["label"] for m in nexus.upcoming(ms, now, "447")], ["mine"])
-        self.assertEqual(nexus.upcoming([{"label": "no times"}], now), [])
+    def test_upcoming_starts_at_the_last_on_field_match(self):
+        ms = [self.match("p1", "On field"), self.match("q1", "On field"), self.match("q2", "On field", red=("447",)),
+              self.match("q3", "On deck"), self.match("q4", "Now queuing", red=("447",)), self.match("q5", "Queuing soon")]
+        self.assertEqual([m["label"] for m in nexus.upcoming(ms)], ["q2", "q3", "q4", "q5"])  # p1, q1 are finished
+        self.assertEqual([m["label"] for m in nexus.upcoming(ms, "447")], ["q2", "q4"])
+        self.assertEqual([m["label"] for m in nexus.upcoming(ms[3:])], ["q3", "q4", "q5"])    # none on field yet: all
+        self.assertEqual(nexus.upcoming([]), [])
 
     def test_eta_text(self):
         m = 60_000

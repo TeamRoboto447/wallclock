@@ -20,7 +20,7 @@ def draw(surf, rect, ctx, opts):
         return
     now_ms = ctx.now * 1000
     team = opts.get("team")
-    nxt = nexus.upcoming(f.value.get("matches", []), now_ms, team)
+    nxt = nexus.upcoming(f.value.get("matches", []), team)
     x, y = rect.x + 20, rect.y + 56
     if not nxt:
         surf.blit(ctx.font_mid.render(f"no upcoming match for {team}" if team else "no upcoming match", True, MUTED), (x, y))

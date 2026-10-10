@@ -23,7 +23,7 @@ def draw(surf, rect, ctx, opts):
         return
     mine = opts.get("team")
     y = rect.y + 52
-    for m in nexus.upcoming(f.value.get("matches", []), ctx.now * 1000, opts.get("team")):
+    for m in nexus.upcoming(f.value.get("matches", []), opts.get("team")):
         if y + 30 > rect.bottom - 8:
             break
         start = m.get("times", {}).get("estimatedStartTime")

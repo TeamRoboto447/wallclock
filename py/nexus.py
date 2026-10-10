@@ -23,10 +23,11 @@ def event(key, max_age=10):
         return data
 
 
-def upcoming(matches, now_ms, team=None):
-    """Matches not yet over, in play order. shortcut: the docs don't list every status value, so
-    'over' means the estimated start was more than 5 min ago; check against a real event's statuses."""
-    out = [m for m in matches if m.get("times", {}).get("estimatedStartTime", 0) >= now_ms - 300_000]
+def upcoming(matches, team=None):
+    """The match on the field and everything after it, in play order. Only one match is ever
+    'On field', so earlier 'On field' matches are finished; with none on field nothing has run yet."""
+    last = max((i for i, m in enumerate(matches) if m.get("status") == "On field"), default=0)
+    out = matches[last:]
     if team:
         out = [m for m in out if team in m.get("redTeams", []) + m.get("blueTeams", [])]
     return out
