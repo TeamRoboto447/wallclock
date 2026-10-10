@@ -86,11 +86,17 @@ def _pw_env():
     return env
 
 
+def _target():
+    # Pi plays to the HDMI sink; TVGUI_AUDIO_TARGET="" (laptop) uses the default sink.
+    t = os.environ.get("TVGUI_AUDIO_TARGET", "alsa-hdmi")
+    return ["--target", t] if t else []
+
+
 def play_wav(path):
     if not path or not os.path.isfile(path):
         return False
     subprocess.run(
-        ["pw-play", "--latency", "20ms", "--target", "alsa-hdmi", path],
+        ["pw-play", "--latency", "20ms", *_target(), path],
         env=_pw_env(),
         check=False,
     )
@@ -321,8 +327,7 @@ def _play_raw(pcm):
             "s16",
             "--latency",
             "20ms",
-            "--target",
-            "alsa-hdmi",
+            *_target(),
             "-",
         ],
         input=pcm,

@@ -17,6 +17,8 @@ EVENT_RE = re.compile(
 
 
 def board_dir():
+    if os.environ.get("TVGUI_BOARD"):
+        return os.environ["TVGUI_BOARD"]
     if os.path.isdir("/var/lib/tvgui"):
         return "/var/lib/tvgui"
     return os.path.dirname(os.path.abspath(__file__))

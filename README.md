@@ -52,12 +52,17 @@ Screen stays on. Live shot: `/run/tvgui/screen.png`. New and first-punch tags ge
 ## Run on a laptop (no reader)
 
 ```bash
-pip install pygame   # or your distro's python3-pygame
-TVGUI_FAKE_NFC=1 TVGUI_WINDOWED=1 TVGUI_DB=./test.sqlite TVGUI_SOCK=/tmp/tvgui.sock python3 py/tvgui.py
+scripts/dev.sh
 ```
 
-Type `alice:mentor` (or `bob`, `carol:parent`) + Enter in that terminal to tap a badge;
-a second tap badges out. Unknown names are created. Needs `DISPLAY`. No enroll or tag writes.
+Uses `.venv` (needs `pygame`), a local DB and plan files in `.local/`, and a fake reader: type
+`alice:mentor` (or `bob`, `carol:parent`) + Enter to tap a badge; a second tap badges out. Unknown
+names are created. Needs `DISPLAY`. No enroll or tag writes.
+
+If `kiosk.env` is present, its `AUTHENTIK_TOKEN` / `LEANTIME_API_KEY` turn on read-only syncs from
+Authentik (every 30s) and Leantime (every 15s). The script unsets `LEANTIME_ROLL_FORWARD`, so nothing is
+written back. Speech needs piper in `.local/piper/` (binary `piper`, voice `en_US-bryce-medium.onnx`);
+without it you get "piper: no audio" and no sound.
 
 ## Layout
 

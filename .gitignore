@@ -17,3 +17,4 @@ kiosk.env
 *.db
 .beads-credential-key
 .beads/proxieddb/
+/.local/
