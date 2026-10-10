@@ -1,6 +1,7 @@
-"""Layout = a list of modules {id?, handler, x, y, w|right, h|bottom|"fit", max_h?, opts?}.
+"""Layout = a list of modules {id?, handler, x, y, w|right|"fit", h|bottom|"fit", max_w?, max_h?, opts?}.
 x/y/w/h are px, or "<id>.<edge>[+/-n]" (edge: x y right bottom) naming an EARLIER module,
-so the list resolves top to bottom with no cycles. h="fit" asks the handler's fit_height()."""
+so the list resolves top to bottom with no cycles. h="fit" / w="fit" ask the handler's fit_height() / fit_width()
+(capped by max_h / max_w)."""
 import importlib
 import json
 import os
@@ -105,7 +106,10 @@ def resolve(layout, ctx, get=handler):
         name = m.get("handler", "?")
         try:
             x, y = _val(m["x"], placed), _val(m["y"], placed)
-            w = _val(m["w"], placed) if "w" in m else _val(m["right"], placed) - x
+            if m.get("w") == "fit":
+                w = min(m["max_w"], get(name).fit_width(ctx, m.get("opts", {}), m["max_w"]))
+            else:
+                w = _val(m["w"], placed) if "w" in m else _val(m["right"], placed) - x
             if m.get("h") == "fit":
                 h = min(m["max_h"], get(name).fit_height(ctx, m.get("opts", {}), w, m["max_h"]))
             elif "h" in m:

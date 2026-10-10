@@ -64,6 +64,12 @@ Authentik (every 30s) and Leantime (every 15s). The script unsets `LEANTIME_ROLL
 written back. Speech needs piper in `.local/piper/` (binary `piper`, voice `en_US-bryce-medium.onnx`);
 without it you get "piper: no audio" and no sound.
 
+## frc.nexus (pit display)
+
+`FRC_NEXUS_API_KEY` (key), `TVGUI_NEXUS_EVENT` (event key, e.g. `demo1509`) and `TVGUI_TEAM` (our team number; the
+schedule and next-match modules show only its matches) go in `kiosk.env`. `scripts/dev.sh` defaults the last two to the
+demo event and team 800 unless `kiosk.env` sets them.
+
 ## Locations (pit display)
 
 `py/layouts/pit.json` groups who's-here by location instead of role. A location is armed first

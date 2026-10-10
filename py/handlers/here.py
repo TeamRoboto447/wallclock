@@ -1,4 +1,5 @@
-"""Who's here. opts: group_by = "role" (default) | "location"; locations = headings in order (location mode)."""
+"""Who's here. opts: group_by = "role" (default) | "location"; locations = headings in order (location mode);
+times = false hides the meeting/total columns. Supports w="fit"."""
 from panels import _draw_here
 
 
@@ -17,5 +18,13 @@ def groups(ctx, opts):
     return out + ([(f"unassigned ({len(lost)})", lost)] if lost else [])
 
 
+def fit_width(ctx, opts, max_w):
+    """Wide enough for the longest name or heading (plus the time columns if shown)."""
+    size = lambda t: ctx.font_sm.size(t)[0]
+    gs = groups(ctx, opts)
+    widest = max([size("who's here")] + [size(label) for label, _ in gs] + [size(r[0]) for _, rows in gs for r in rows])
+    return min(max_w, max(220, widest + 40 + (0 if opts.get("times") is False else 210)))
+
+
 def draw(surf, rect, ctx, opts):
-    _draw_here(surf, rect, groups(ctx, opts), ctx.font_sm, ctx.now)
+    _draw_here(surf, rect, groups(ctx, opts), ctx.font_sm, ctx.now, opts.get("times", True))

@@ -12,7 +12,7 @@ KINDS = {  # kind -> (event key, title, row text)
 
 
 def refresh(opts):
-    return nexus.event(opts["event"])
+    return nexus.event(nexus.event_key(opts))
 
 
 def draw(surf, rect, ctx, opts):

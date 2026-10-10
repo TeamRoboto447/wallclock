@@ -27,7 +27,7 @@ from sync_leantime import (
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
 from nfc import PENDING, _run_fake, split_here, tap
-from handlers.here import groups as here_groups
+from handlers.here import fit_width, groups as here_groups
 from layout import LayoutFile, module_key, resolve
 from refresh import Refresher
 import nexus
@@ -960,6 +960,44 @@ class LocationTests(unittest.TestCase):
                          [("pit (2)", ["Bo", "Zed"]), ("practice field (0)", []), ("stands (1)", ["Amy"]),
                           ("garage (1)", ["Cy"]), ("unassigned (1)", ["Di"])])
         self.assertEqual([h for h, _ in here_groups(C, {})], ["students (4)", "parents (0)", "mentors (1)"])
+
+
+class FitWidthTests(unittest.TestCase):
+    class Font:
+        @staticmethod
+        def size(text):
+            return (10 * len(text), 20)
+
+    def ctx(self, names):
+        c = type("C", (), {})()
+        c.font_sm = self.Font
+        c.size = (1920, 1080)
+        c.mentors, c.parents = [], []
+        c.students = [(n, 0, False, 0, "pit") for n in names]
+        return c
+
+    def test_width_follows_the_longest_name_between_floor_and_cap(self):
+        opts = {"group_by": "location", "locations": ["pit"], "times": False}
+        self.assertEqual(fit_width(self.ctx([]), opts, 560), 220)                       # floor
+        self.assertEqual(fit_width(self.ctx(["a" * 30]), opts, 560), 340)               # 300 + 40
+        self.assertEqual(fit_width(self.ctx(["a" * 80]), opts, 560), 560)               # cap
+        self.assertEqual(fit_width(self.ctx(["a" * 30]), {**opts, "times": True}, 560), 550)  # + time columns
+
+    def test_resolver_places_modules_after_a_fit_width_module(self):
+        import types
+        H = types.SimpleNamespace(fit_width=lambda ctx, opts, max_w: 300)
+        layout = [{"id": "r", "handler": "h", "x": 24, "y": 0, "w": "fit", "max_w": 560, "h": 50},
+                  {"handler": "h", "x": "r.right+24", "y": 0, "right": 600, "h": 10}]
+        ctx = type("C", (), {"size": (1000, 100)})()
+        self.assertEqual([r for _, r in resolve(layout, ctx, lambda n: H)], [(24, 0, 300, 50), (348, 0, 252, 10)])
+
+    def test_team_and_event_come_from_opts_then_env(self):
+        import unittest.mock as mock
+        with mock.patch.dict(os.environ, {"TVGUI_TEAM": "447", "TVGUI_NEXUS_EVENT": "ev1"}):
+            self.assertEqual((nexus.team({}), nexus.event_key({})), ("447", "ev1"))
+            self.assertEqual((nexus.team({"team": "800"}), nexus.event_key({"event": "ev2"})), ("800", "ev2"))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(nexus.team({}))
 
 
 if __name__ == "__main__":

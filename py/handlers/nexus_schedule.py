@@ -1,4 +1,4 @@
-"""Upcoming matches. opts: event (required), team (only that team's matches), title."""
+"""Upcoming matches of our team (opts team, else $TVGUI_TEAM; all matches if neither). opts: event, team, title."""
 import datetime
 
 import pygame
@@ -11,19 +11,20 @@ TAGS = {"On field": ("FIELD", GREEN), "On deck": ("DECK", YELLOW), "Now queuing"
 
 
 def refresh(opts):
-    return nexus.event(opts["event"])
+    return nexus.event(nexus.event_key(opts))
 
 
 def draw(surf, rect, ctx, opts):
     pygame.draw.rect(surf, PANEL, rect)
-    surf.blit(ctx.font_sm.render(opts.get("title", "match schedule"), True, BEIGE), (rect.x + 20, rect.y + 16))
+    mine = nexus.team(opts)
+    title = opts.get("title") or (f"our matches (team {mine})" if mine else "match schedule")
+    surf.blit(ctx.font_sm.render(title, True, BEIGE), (rect.x + 20, rect.y + 16))
     f = ctx.fetched("nexus_schedule", opts)
     draw_freshness(surf, rect, ctx.font_sm, f, ctx.now, 3 * INTERVAL)
     if f is None or f.value is None:
         return
-    mine = opts.get("team")
     y = rect.y + 52
-    for m in nexus.upcoming(f.value.get("matches", []), opts.get("team")):
+    for m in nexus.upcoming(f.value.get("matches", []), mine):
         if y + 30 > rect.bottom - 8:
             break
         start = m.get("times", {}).get("estimatedStartTime")

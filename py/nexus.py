@@ -23,6 +23,14 @@ def event(key, max_age=10):
         return data
 
 
+def event_key(opts):
+    return opts.get("event") or os.environ["TVGUI_NEXUS_EVENT"]
+
+
+def team(opts):
+    return opts.get("team") or os.environ.get("TVGUI_TEAM") or None
+
+
 def upcoming(matches, team=None):
     """The match on the field and everything after it, in play order. Only one match is ever
     'On field', so earlier 'On field' matches are finished; with none on field nothing has run yet."""

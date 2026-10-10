@@ -3,6 +3,7 @@
 cd "$(dirname "$0")/.." || exit 1
 mkdir -p .local
 [ -f kiosk.env ] && { set -a; . ./kiosk.env; set +a; }
+export TVGUI_NEXUS_EVENT=${TVGUI_NEXUS_EVENT:-demo1509} TVGUI_TEAM=${TVGUI_TEAM:-800}  # demo event + a team in it; kiosk.env overrides
 unset LEANTIME_ROLL_FORWARD  # the only path that writes to Leantime
 export TVGUI_FAKE_NFC=1 TVGUI_WINDOWED=1 SDL_AUDIODRIVER=dummy TVGUI_AUDIO_TARGET=
 export TVGUI_DB=$PWD/.local/test.sqlite TVGUI_BOARD=$PWD/.local

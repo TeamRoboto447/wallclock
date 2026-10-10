@@ -1,10 +1,10 @@
 [
   {"handler": "title", "x": 24, "y": 24, "w": 400, "h": 40},
-  {"handler": "here", "x": 24, "y": 80, "w": 456, "h": 812, "opts": {"group_by": "location", "locations": ["pit", "practice field", "stands", "field", "cafeteria"]}},
-  {"handler": "nexus_next", "x": 504, "y": 80, "w": 1392, "h": 290, "opts": {"event": "demo1509", "team": "800", "title": "next match (team 800)"}},
-  {"handler": "nexus_schedule", "x": 504, "y": 394, "w": 684, "bottom": 892, "opts": {"event": "demo1509", "title": "match schedule"}},
-  {"handler": "nexus_feed", "x": 1212, "y": 394, "w": 684, "h": 230, "opts": {"event": "demo1509", "kind": "parts"}},
-  {"handler": "nexus_feed", "x": 1212, "y": 648, "w": 684, "bottom": 892, "opts": {"event": "demo1509", "kind": "announcements"}},
+  {"id": "here", "handler": "here", "x": 24, "y": 80, "w": "fit", "max_w": 560, "h": 812, "opts": {"group_by": "location", "times": false, "locations": ["pit", "practice field", "stands", "field", "cafeteria"]}},
+  {"id": "next", "handler": "nexus_next", "x": "here.right+24", "y": 80, "right": 1896, "h": 96},
+  {"id": "parts", "handler": "nexus_feed", "x": "here.right+24", "y": "next.bottom+24", "w": 560, "h": 334, "opts": {"kind": "parts"}},
+  {"id": "sched", "handler": "nexus_schedule", "x": "parts.right+24", "y": "next.bottom+24", "right": 1896, "h": 334},
+  {"id": "ann", "handler": "nexus_feed", "x": "here.right+24", "y": "parts.bottom+24", "w": 560, "bottom": 892, "opts": {"kind": "announcements"}},
   {"handler": "status", "x": 24, "y": 916, "w": 1872, "h": 140},
   {"handler": "clock", "x": 24, "y": 916, "w": 1872, "h": 140}
 ]
