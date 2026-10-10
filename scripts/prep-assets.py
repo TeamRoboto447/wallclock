@@ -23,6 +23,23 @@ def save(img, name):
     print(f"{name}: {img.get_width()}x{img.get_height()} {os.path.getsize(path) // 1024} KB")
 
 
+def with_shadow(img, pad=28, blur=6, dy=6, strength=255):
+    """Soft drop shadow baked into the logo so it stands out from the busy banner behind it. The canvas
+    grows by pad on every side (the layout box for it must too), and the blur runs on the padded canvas
+    so the shadow spreads past the logo's edge."""
+    w, h = img.get_size()
+    size = (w + 2 * pad, h + 2 * pad)
+    sil = pygame.mask.from_surface(img).to_surface(setcolor=(0, 0, 0, strength), unsetcolor=(0, 0, 0, 0))
+    base = pygame.Surface(size, pygame.SRCALPHA)
+    base.blit(sil, (pad, pad))
+    glow = pygame.transform.smoothscale(pygame.transform.smoothscale(base, (size[0] // blur, size[1] // blur)), size)  # shrink + stretch = cheap blur
+    canvas = pygame.Surface(size, pygame.SRCALPHA)
+    for _ in range(3):  # stacked for a denser shadow
+        canvas.blit(glow, (0, dy))
+    canvas.blit(img, (pad, pad))
+    return canvas
+
+
 def main():
     pygame.init()
     os.makedirs(OUT, exist_ok=True)
@@ -30,7 +47,8 @@ def main():
     logo = load("Team Roboto Logo - Smooth.png")
     logo = logo.subsurface(logo.get_bounding_rect()).copy()  # drop the transparent padding
     h = 256
-    save(pygame.transform.smoothscale(logo, (round(logo.get_width() * h / logo.get_height()), h)), "logo.png")
+    logo = pygame.transform.smoothscale(logo, (round(logo.get_width() * h / logo.get_height()), h))
+    save(with_shadow(logo), "logo.png")
 
     art = load("banner yes.png")  # cover 1920x1080, then darken
     scale = max(W / art.get_width(), H / art.get_height())

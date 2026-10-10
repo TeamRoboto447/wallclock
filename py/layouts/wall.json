@@ -1,7 +1,7 @@
 [
   {"handler": "image", "x": 0, "y": 0, "w": 1920, "h": 1080, "opts": {"file": "background.jpg", "fit": "cover"}},
   {"handler": "image", "x": 24, "y": 20, "w": 1872, "h": 64, "opts": {"file": "strip.jpg", "fit": "cover"}},
-  {"handler": "image", "x": 24, "y": 8, "w": 160, "h": 88, "opts": {"file": "logo.png"}},
+  {"handler": "image", "x": 14, "y": 0, "w": 173, "h": 107, "opts": {"file": "logo.png"}},
   {"handler": "here", "x": 24, "y": 104, "w": 456, "h": 788},
   {"id": "plan", "handler": "plan", "x": 504, "y": 104, "w": 1392, "h": "fit", "max_h": 382},
   {"handler": "md", "x": 504, "y": "plan.bottom+24", "w": 684, "bottom": 892, "opts": {"source": "priority", "title": "priority"}},
