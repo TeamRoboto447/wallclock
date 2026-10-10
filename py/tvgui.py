@@ -19,7 +19,7 @@ from deck import start as deck_start, stop as deck_stop
 from nfc import EnrollSlot, split_here, start as nfc_start
 from punches import fix_punch, list_punches
 from plan import load_md, load_plan, plan_path, priority_path, today_path
-from panels import CYCLE_SECS, FONT
+from panels import CYCLE_SECS, FONT, draw_overlay
 from tts import backfill, play_enabled, play_greet, say, say_ready
 
 W, H = 1920, 1080
@@ -235,6 +235,7 @@ def kiosk():
     refresher.sync(layouts.get())
     fonts = (font_big, font_mid, font_sm)
 
+    overlay = None  # (title, people, until) shown on top of the layout for a while (a long-press on the deck)
     ticking = 0  # redraw interval a module asked for in the last frame (flashing borders), 0 = none
 
     def frame():
@@ -242,6 +243,8 @@ def kiosk():
         ctx = Ctx(size, fonts, now, mentors, students, parents, status, plan, today_items,
                   priority_items, (net["state"], net["bars"]), refresher.state, int(time.monotonic() * 2))
         surf = render_layout(layouts.get(), ctx)
+        if overlay:
+            draw_overlay(surf, size, overlay[0], overlay[1], font_mid, font_sm)
         ticking = ctx.tick
         return surf
 
@@ -264,6 +267,7 @@ def kiosk():
         layouts.mtime,
         refresher.version,
         int(time.monotonic() / ticking) if ticking else 0,
+        overlay[2] if overlay else 0,
         net["state"],
         net["bars"],
     )
@@ -319,6 +323,9 @@ def kiosk():
                         target=play_greet, args=(item[1], item[2]), daemon=True
                     ).start()
                     woke = True
+                elif kind == "overlay":
+                    overlay = (item[1], item[2], time.monotonic() + item[3])
+                    woke = True
                 elif kind == "layout_next":
                     layouts.use(next_layout(layouts.path))
                     status = f"Layout: {os.path.splitext(os.path.basename(layouts.path))[0]}"
@@ -367,6 +374,8 @@ def kiosk():
         today_items, today_mtime = load_md(today_path())
         priority_items, priority_mtime = load_md(priority_path())
         refresher.sync(layouts.get())  # re-stat the layout file so an edit triggers a redraw
+        if overlay and time.monotonic() >= overlay[2]:
+            overlay = None
         new_key = (
             tuple(mentors),
             tuple(students),
@@ -380,6 +389,7 @@ def kiosk():
             layouts.mtime,
             refresher.version,
             int(time.monotonic() / ticking) if ticking else 0,
+            overlay[2] if overlay else 0,
             net["state"],
             net["bars"],
         )

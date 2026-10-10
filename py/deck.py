@@ -12,6 +12,8 @@ from nfc import ADMIN, PENDING, WORK, split_here
 from plan import load_md, load_plan, plan_path, priority_path
 
 CONFIRM_SECS = 5
+LONG_PRESS_SECS = 0.6  # holding a pick key this long shows who is on it instead of arming it
+OVERLAY_SECS = 10
 BRIGHTNESS = (30, 60, 100)
 BLACK, INDIGO, RED, AMBER, SLATE, WHITE = (0, 0, 0), (0x1C, 0x10, 0x6A), (0xB5, 0x04, 0x04), (0xE6, 0xB4, 0x22), (0x2A, 0x2A, 0x3C), (255, 255, 255)
 
@@ -145,7 +147,37 @@ class Deck:
         specs[n - 1] = self._admin_key(now)
         return specs
 
-    def press(self, i, now, n=15):
+    def who_event(self, i, now, n):
+        """('overlay', title, [(name, enabled)], secs) for the pick key i, or None if it is not one."""
+        rows, title, want = self._rows(), None, None
+        if self.pick == "work":
+            milestones, tasks = self.work(now)
+            slots = n - 3
+            if self.milestone is not None and now < self.view_until:
+                mine = tasks.get(self.milestone, [])[:slots]
+                if i < len(mine):
+                    title, want = f"{self.milestone} › {mine[i]}", lambda r: _field(r, 5) == self.milestone and _field(r, 6) == mine[i]
+                elif i == n - 2:
+                    title, want = self.milestone, lambda r: _field(r, 5) == self.milestone
+            else:
+                page = milestones[self.page * slots:(self.page + 1) * slots]
+                if i < len(page):
+                    title, want = page[i], lambda r: _field(r, 5) == page[i]
+                elif i == n - 2:
+                    title, want = "General", lambda r: _field(r, 5) == "General"
+        elif self.pick == "location" and i < len(self.locations):
+            title, want = self.locations[i], lambda r: _field(r, 4) == self.locations[i]
+        if title is None:
+            return None
+        people = sorted(((r[0], r[2]) for r in rows if want(r)), key=lambda p: p[0].lower())
+        return ("overlay", title, people, OVERLAY_SECS)
+
+    def press(self, i, now, n=15, long=False):
+        if long and not ADMIN.is_open(now):
+            event = self.who_event(i, now, n)
+            if event:
+                self.event_q.put(event)
+                return
         if ADMIN.is_open(now):
             ADMIN.touch(now)
             self._admin(i, now, n)
@@ -291,12 +323,17 @@ def _serve(logic, deck, PILHelper):
     n = deck.key_count()
     size = deck.key_image_format()["size"]
 
-    def on_key(_deck, key, down):
+    down_at = {}
+
+    def on_key(_deck, key, down):  # keys act on release so a long press can mean "who is on this"
+        now = time.time()
         if down:
-            try:
-                logic.press(key, time.time(), n)
-            except Exception as e:  # a failing action must not kill the deck's read thread
-                print(f"deck: key {key}: {e!r}", flush=True)
+            down_at[key] = now
+            return
+        try:
+            logic.press(key, now, n, long=now - down_at.pop(key, now) >= LONG_PRESS_SECS)
+        except Exception as e:  # a failing action must not kill the deck's read thread
+            print(f"deck: key {key}: {e!r}", flush=True)
 
     deck.set_key_callback(on_key)
     shown, bright = {}, None

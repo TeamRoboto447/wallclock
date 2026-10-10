@@ -456,3 +456,27 @@ def panel_bg(surf, rect, color=PANEL, alpha=PANEL_ALPHA):
         pygame.draw.rect(_shells[key], (*color, alpha), _shells[key].get_rect(), border_radius=RADIUS)
     surf.blit(_shells[key], rect.topleft)
     pygame.draw.rect(surf, BORDER, rect, 1, border_radius=RADIUS)
+
+
+def draw_overlay(surf, size, title, people, font_mid, font_sm):
+    """A temporary centred panel on top of the whole screen: title and a list of (name, enabled), three columns."""
+    import pygame
+
+    w = min(1100, size[0] - 160)
+    cols = 3
+    shown = people[:36]
+    rows = max(1, -(-len(shown) // cols))
+    rect = pygame.Rect(0, 0, w, 110 + rows * 40 + (34 if len(people) > len(shown) else 0))
+    rect.center = (size[0] // 2, size[1] // 2)
+    panel_bg(surf, rect, PANEL, 252)
+    pygame.draw.rect(surf, BORDER, rect, 3, border_radius=RADIUS * 2)
+    surf.blit(font_mid.render(f"{title} ({len(people)})", True, CORAL), (rect.x + 28, rect.y + 22))
+    if not people:
+        surf.blit(font_sm.render("nobody yet", True, MUTED), (rect.x + 28, rect.y + 78))
+    col_w = (rect.width - 56) // cols
+    for i, (name, enabled) in enumerate(shown):
+        while len(name) > 1 and font_mid.size(name)[0] > col_w - 16:
+            name = name[:-1]
+        surf.blit(font_mid.render(name, True, GREEN if enabled else INK), (rect.x + 28 + (i // rows) * col_w, rect.y + 78 + (i % rows) * 40))
+    if len(people) > len(shown):
+        surf.blit(font_sm.render(f"+{len(people) - len(shown)} more", True, MUTED), (rect.x + 28, rect.bottom - 34))

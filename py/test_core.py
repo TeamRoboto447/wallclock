@@ -1297,6 +1297,12 @@ class WorkTests(unittest.TestCase):
         self.kid = Member("Kid", "kid", "Kid", Role.STUDENT)
         self.store.upsert(self.kid)
 
+    def events(self):
+        out = []
+        while not self.q.empty():
+            out.append(self.q.get_nowait())
+        return out
+
     def test_store_keeps_work_on_the_open_clock_in_only(self):
         self.store.toggle(self.kid, 100, 0, work=("Shop Organization", "Organize Build Space"))
         m = self.store.who()[0][0]
@@ -1344,6 +1350,39 @@ class WorkTests(unittest.TestCase):
         self.assertEqual(WORK.peek(), ("Milestone 00", None))
         self.deck.press(13, 1007)
         self.assertEqual(WORK.peek(), ("General", None))
+
+    def test_long_press_shows_who_is_on_it_and_a_tap_still_arms(self):
+        deck = Deck(self.store, self.state, self.q, lambda: [{"deck": {"pick": "work"}}])
+        deck._work, deck._work_at = (["Alpha", "Beta"], {"Alpha": ["Fix arm"]}), 1e12
+        self.state["students"] = [("Zed", 0, True, 0, None, "Alpha", "Fix arm", "Z"), ("Amy", 0, False, 0, None, "Alpha", None, "A"),
+                                  ("Bo", 0, False, 0, None, "Beta", None, "B"), ("Cy", 0, False, 0, None, "General", None, "C")]
+        deck.press(0, 1000, long=True)
+        self.assertEqual(self.events(), [("overlay", "Alpha", [("Amy", False), ("Zed", True)], 10)])
+        self.assertIsNone(WORK.peek())                                          # a long press does not arm
+        deck.press(13, 1001, long=True)                                         # GENERAL
+        self.assertEqual(self.events()[0][1:3], ("General", [("Cy", False)]))
+        deck.press(0, 1002)                                                     # a tap on a milestone with tasks opens its page
+        deck.press(0, 1003, long=True)
+        self.assertEqual(self.events(), [("overlay", "Alpha › Fix arm", [("Zed", True)], 10)])
+        deck.press(14, 1004, long=True)                                         # BACK is not a pick key: acts as a normal press
+        self.assertEqual(self.events(), [])
+        loc = Deck(self.store, self.state, self.q, locations=["pit"])
+        self.state["students"] = [("Ann", 0, False, 0, "pit", None, None, "A")]
+        loc.press(0, 1005, long=True)
+        self.assertEqual(self.events(), [("overlay", "pit", [("Ann", False)], 10)])
+
+    def test_overlay_renders_with_few_many_and_no_people(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        from panels import draw_overlay
+
+        pygame.font.init()
+        f = pygame.font.Font(None, 30)
+        for people in ([], [("Ann", True)], [(f"Person {i}", i % 2 == 0) for i in range(50)]):
+            surf = pygame.Surface((1920, 1080))
+            draw_overlay(surf, (1920, 1080), "Shop Organization", people, f, f)
 
     def test_paging_and_task_page_timeout(self):
         self.deck.press(12, 1000)

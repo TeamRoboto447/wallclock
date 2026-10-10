@@ -109,7 +109,8 @@ reconnects; if a crashed process (kill -9) ever leaves it stuck, unplug and repl
 
 The shop layout (`py/layouts/shop.json`) has `{"deck": {"pick": "work"}}`, so the Stream Deck offers the active milestones
 (from `plan.md`, with a head-count each), then optionally one of that milestone's **priority** tasks (`priority.md`), plus a GENERAL key.
-Press a key, then badge within 30 s; armed + tap while clocked in switches project. The choice is stored on the open clock-in
+Press a key, then badge within 30 s; armed + tap while clocked in switches project. **Hold** a milestone, task or
+location key (about 0.6 s) to show who is on it as an overlay on the screen for 10 s instead (keys act on release). The choice is stored on the open clock-in
 (`punches.milestone`, `punches.task`; current state only, no history). `TVGUI_REQUIRE_WORK=1` refuses clock-ins without a pick
 (toggle it on the admin page: REQUIRE). Without a deck, the laptop fake reader accepts `#Shop Organization > Organize Build Space`.
 
