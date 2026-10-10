@@ -326,6 +326,9 @@ def kiosk():
                 elif kind == "overlay":
                     overlay = (item[1], item[2], time.monotonic() + item[3])
                     woke = True
+                elif kind == "overlay_close":
+                    overlay = None
+                    woke = True
                 elif kind == "layout_next":
                     layouts.use(next_layout(layouts.path))
                     status = f"Layout: {os.path.splitext(os.path.basename(layouts.path))[0]}"

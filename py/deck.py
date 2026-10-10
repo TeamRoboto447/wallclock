@@ -52,6 +52,7 @@ class Deck:
         self.bright_i = 1
         self._work, self._work_at = ([], {}), -1e9  # (milestones, {milestone: [priority tasks]}), cached
         self.page, self.milestone, self.view_until = 0, None, 0
+        self.overlay_until = 0  # while the who-overlay is up, the last key is CLOSE
 
     @property
     def pick(self):
@@ -84,6 +85,12 @@ class Deck:
         return self._work
 
     def keys(self, now, n=15):
+        specs = self._keys(now, n)
+        if now < self.overlay_until and not ADMIN.is_open(now):
+            specs[n - 1] = ("CLOSE", "overlay", RED, WHITE)
+        return specs
+
+    def _keys(self, now, n=15):
         """[(label, sub-label, background, foreground) or None] for each of the n keys, ADMIN/BACK on the last."""
         specs = [None] * n
         if ADMIN.is_open(now):
@@ -173,9 +180,14 @@ class Deck:
         return ("overlay", title, people, OVERLAY_SECS)
 
     def press(self, i, now, n=15, long=False):
+        if now < self.overlay_until and i == n - 1 and not ADMIN.is_open(now):  # CLOSE
+            self.overlay_until = 0
+            self.event_q.put(("overlay_close",))
+            return
         if long and not ADMIN.is_open(now):
             event = self.who_event(i, now, n)
             if event:
+                self.overlay_until = now + OVERLAY_SECS
                 self.event_q.put(event)
                 return
         if ADMIN.is_open(now):

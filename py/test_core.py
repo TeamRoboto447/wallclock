@@ -1361,10 +1361,19 @@ class WorkTests(unittest.TestCase):
         self.assertIsNone(WORK.peek())                                          # a long press does not arm
         deck.press(13, 1001, long=True)                                         # GENERAL
         self.assertEqual(self.events()[0][1:3], ("General", [("Cy", False)]))
+        self.assertEqual(deck.keys(1001)[14][:2], ("CLOSE", "overlay"))        # the overlay can be dismissed from the deck
+        deck.press(14, 1001)
+        self.assertEqual(self.events(), [("overlay_close",)])
+        self.assertEqual(deck.keys(1001)[14][0], "ADMIN")
+        deck.press(0, 1001, long=True)
+        self.events()
+        self.assertEqual(deck.keys(1001 + 11)[14][0], "ADMIN")                 # or it expires on its own
         deck.press(0, 1002)                                                     # a tap on a milestone with tasks opens its page
         deck.press(0, 1003, long=True)
         self.assertEqual(self.events(), [("overlay", "Alpha › Fix arm", [("Zed", True)], 10)])
-        deck.press(14, 1004, long=True)                                         # BACK is not a pick key: acts as a normal press
+        deck.press(14, 1004, long=True)                                         # overlay is up: the last key is CLOSE
+        self.assertEqual(self.events(), [("overlay_close",)])
+        deck.press(10, 1004, long=True)                                         # an empty slot is not a pick key
         self.assertEqual(self.events(), [])
         loc = Deck(self.store, self.state, self.q, locations=["pit"])
         self.state["students"] = [("Ann", 0, False, 0, "pit", None, None, "A")]
