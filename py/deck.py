@@ -1,27 +1,41 @@
 """Stream Deck: location keys (arm a location for the next badge tap) and an admin page that opens only after
 a mentor taps their badge. Optional hardware: needs the streamdeck and PIL packages and a deck, otherwise it
 logs once and stops (or keeps retrying while no deck is attached), so displays without a deck are unaffected.
-Env: TVGUI_DECK_LOCATIONS (comma list, must match the layout's locations), TVGUI_NO_DECK=1 to disable."""
+The location keys come from the displayed layout (its roster module's locations), so a layout without
+locations has none. TVGUI_NO_DECK=1 disables the deck."""
 import os
 import threading
 import time
 
 from nfc import ADMIN, PENDING, split_here
 
-DEFAULT_LOCATIONS = "pit,practice field,stands,field,cafeteria"
 CONFIRM_SECS = 5
 BRIGHTNESS = (30, 60, 100)
 BLACK, INDIGO, RED, AMBER, SLATE, WHITE = (0, 0, 0), (0x1C, 0x10, 0x6A), (0xB5, 0x04, 0x04), (0xE6, 0xB4, 0x22), (0x2A, 0x2A, 0x3C), (255, 255, 255)
 
 
+def layout_locations(layout):
+    """Locations a layout asks for: those of its roster modules that group by location."""
+    out = []
+    for m in layout or []:
+        o = m.get("opts") or {}
+        if m.get("handler") == "here" and o.get("group_by") == "location":
+            out += [loc for loc in o.get("locations", []) if loc not in out]
+    return out
+
+
 class Deck:
     """Key contents and key presses, with no hardware in it (tested directly)."""
 
-    def __init__(self, store, state, event_q, locations=None):
+    def __init__(self, store, state, event_q, layout=None, locations=None):
         self.store, self.state, self.event_q = store, state, event_q
-        self.locations = locations or [s.strip() for s in os.environ.get("TVGUI_DECK_LOCATIONS", DEFAULT_LOCATIONS).split(",") if s.strip()]
+        self._layout, self._locations = layout, locations  # layout: callable giving the displayed layout
         self.confirm_until = 0
         self.bright_i = 1
+
+    @property
+    def locations(self):
+        return self._locations if self._locations is not None else layout_locations(self._layout() if self._layout else [])
 
     def _rows(self):
         with self.state["lock"]:
@@ -48,10 +62,11 @@ class Deck:
             specs[n - 1] = ("BACK", "", INDIGO, WHITE)
             return specs
         armed = PENDING.peek(now)
+        locations = self.locations
         counts = {}
         for r in self._rows():
             counts[r[4]] = counts.get(r[4], 0) + 1
-        for i, loc in enumerate(self.locations[: n - 1]):
+        for i, loc in enumerate(locations[: n - 1]):
             specs[i] = (loc, "TAP BADGE" if loc == armed else str(counts.get(loc, 0)), RED if loc == armed else INDIGO, WHITE)
         specs[n - 1] = ("TAP", "MENTOR", AMBER, BLACK) if ADMIN.waiting(now) else ("ADMIN", "", SLATE, WHITE)
         return specs
@@ -135,6 +150,18 @@ def render(spec, size=(72, 72)):
     return img
 
 
+_stop = threading.Event()
+_thread = None
+
+
+def stop():
+    """Release the deck and end the thread. Must run before the process exits: the library's read thread
+    keeps a leftover process alive, and with it the USB device, so the next start cannot open the deck."""
+    _stop.set()
+    if _thread is not None:
+        _thread.join(timeout=3)
+
+
 def _serve(logic, deck, PILHelper):
     deck.open()
     deck.reset()
@@ -150,7 +177,7 @@ def _serve(logic, deck, PILHelper):
 
     deck.set_key_callback(on_key)
     shown, bright = {}, None
-    while deck.is_open():
+    while deck.is_open() and not _stop.is_set():
         specs = logic.keys(time.time(), n)
         for i, spec in enumerate(specs):
             if spec != shown.get(i):
@@ -177,7 +204,9 @@ def _loop(logic):
             decks = DeviceManager().enumerate()
             deck = decks[0] if decks else None
             if deck is None:
-                time.sleep(5)
+                _stop.wait(5)
+                if _stop.is_set():
+                    return
                 continue
             print("deck: connected", flush=True)
             said = False
@@ -187,21 +216,23 @@ def _loop(logic):
                 print(f"deck: {e!r}; retrying", flush=True)
                 said = True
         finally:
-            try:
-                if deck is not None:
-                    deck.reset()
-                    deck.close()
-            except Exception:
-                pass
-        time.sleep(5)
+            for release in ("reset", "close"):  # close must run even if reset fails, or the read thread leaks
+                try:
+                    getattr(deck, release)() if deck is not None else None
+                except Exception:
+                    pass
+        if _stop.wait(5):
+            return
 
 
-def start(store, state, event_q):
+def start(store, state, event_q, layout=None):
+    global _thread
     if os.environ.get("TVGUI_NO_DECK"):
         return None
-    t = threading.Thread(target=_loop, args=(Deck(store, state, event_q),), daemon=True)
-    t.start()
-    return t
+    _stop.clear()
+    _thread = threading.Thread(target=_loop, args=(Deck(store, state, event_q, layout),), daemon=True)
+    _thread.start()
+    return _thread
 
 
 def sheet(path):
@@ -212,7 +243,7 @@ def sheet(path):
 
     rows = [(f"P{i}", 0, True, 0, loc) for i, loc in enumerate(["pit", "pit", "stands", "field", "field", "field", "cafeteria"])]
     state = {"lock": threading.Lock(), "mentors": rows[:2], "students": rows[2:], "parents": [], "blanked": False}
-    logic = Deck(Store(":memory:"), state, __import__("queue").Queue())
+    logic = Deck(Store(":memory:"), state, __import__("queue").Queue(), locations=["pit", "practice field", "stands", "field", "cafeteria"])
     now = 1000.0
     pages = []
     pages.append(("main", logic.keys(now)))

@@ -93,11 +93,13 @@ Only mentions, links and `&amp;`-style escapes are cleaned up; bold, code, emoji
 ## Stream Deck (pit display)
 
 Optional. The kiosk starts a Stream Deck thread when the `streamdeck` + `PIL` packages and a deck are present (silently idle
-otherwise; `TVGUI_NO_DECK=1` turns it off). Laptop: `.venv/bin/pip install streamdeck pillow` (and `hidapi`). Pi:
+otherwise; `TVGUI_NO_DECK=1` turns it off). It releases the deck when the kiosk closes (window, Esc, Ctrl-C or SIGTERM), so a restart
+reconnects; if a crashed process (kill -9) ever leaves it stuck, unplug and replug it. Laptop: `.venv/bin/pip install streamdeck pillow` (and `hidapi`). Pi:
 `setup-pi.sh` installs `python3-elgato-streamdeck python3-pil libhidapi-libusb0` and `deploy/60-streamdeck.rules` (untested on the Pi).
 
-- **Top-row keys = locations** (`TVGUI_DECK_LOCATIONS`, default `pit,practice field,stands,field,cafeteria`, must match the layout's list)
-  showing the head-count. Press one, then badge within 30 s.
+- **Top-row keys = locations**, taken from the layout on screen: the `locations` of its roster (`here`) module when it groups by location
+  (pit layout: pit, practice field, stands, field, cafeteria). A layout without locations (the shop wall) has none, and the keys change when the
+  layout is switched. Each shows the head-count; press one, then badge within 30 s.
 - **Bottom-right key = ADMIN.** Press it, then a *mentor* taps their badge (no punch happens); the admin page opens for 60 s of idle time.
   Keys: clock everyone out (press twice within 5 s), next layout, screen on/off, audio test, info (status bar), require-location on/off,
   brightness, back. Admin presses are logged (`admin: ...`).

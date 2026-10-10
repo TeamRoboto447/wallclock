@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -14,7 +15,7 @@ from refresh import Refresher
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from netstatus import probe as net_probe
-from deck import start as deck_start
+from deck import start as deck_start, stop as deck_stop
 from nfc import EnrollSlot, split_here, start as nfc_start
 from punches import fix_punch, list_punches
 from plan import load_md, load_plan, plan_path, priority_path, today_path
@@ -129,6 +130,7 @@ def open_display():
     import pygame
     from pygame._sdl2.video import Window, Renderer
 
+    os.environ.setdefault("SDL_JOYSTICK_HIDAPI", "0")  # SDL must not open HID devices (the Stream Deck) itself
     pygame.init()
     fullscreen = bool(os.environ.get("DISPLAY"))
     if os.environ.get("TVGUI_WINDOWED"):  # laptop: resizable window instead of fullscreen
@@ -220,6 +222,8 @@ def kiosk():
     }
 
     win, renderer = open_display()
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):  # stop/Ctrl-C end the loop like closing the window
+        signal.signal(sig, lambda *_: pygame.event.post(pygame.event.Event(pygame.QUIT)))
     pygame.mouse.set_visible(False)
     font_big = pygame.font.Font(FONT, 40)
     font_mid = pygame.font.Font(FONT, 32)
@@ -278,7 +282,7 @@ def kiosk():
         target=listen, args=(socket_path(), slot, events, state), daemon=True
     ).start()
     nfc_start(store, slot, events)
-    deck_start(store, state, events)
+    deck_start(store, state, events, lambda: layouts.layout)
     clock = pygame.time.Clock()
     running = True
     while running:
@@ -399,6 +403,7 @@ def kiosk():
         except Exception as e:
             print(f"draw: {e}", flush=True)
         clock.tick(10)
+    deck_stop()  # before SDL shuts down: a still-open deck made pygame.quit() hang
     pygame.quit()
 
 
@@ -406,7 +411,10 @@ def main():
     args = sys.argv[1:]
     cmd = args[0] if args else "kiosk"
     if cmd in ("kiosk",):
-        kiosk()
+        try:
+            kiosk()
+        finally:
+            deck_stop()  # frees the Stream Deck, or the process would never exit
     elif cmd == "scan":
         try:
             while True:

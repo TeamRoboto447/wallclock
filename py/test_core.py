@@ -27,7 +27,7 @@ from sync_leantime import (
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
 from nfc import ADMIN, PENDING, _run_fake, split_here, tap
-from deck import Deck, render as render_key
+from deck import Deck, layout_locations, render as render_key
 from layout import next_layout
 from handlers.here import fit_width, groups as here_groups
 from layout import LayoutFile, module_key, resolve
@@ -1160,7 +1160,7 @@ class DeckTests(unittest.TestCase):
         self.store = Store(":memory:")
         self.q = queue.Queue()
         self.state = {"lock": threading.Lock(), "mentors": [], "students": [], "parents": [], "blanked": False}
-        self.deck = Deck(self.store, self.state, self.q, ["pit", "stands"])
+        self.deck = Deck(self.store, self.state, self.q, locations=["pit", "stands"])
         self.mentor = Member("Ann", "ann", "Ann", Role.MENTOR)
         self.kid = Member("Kid", "kid", "Kid", Role.STUDENT)
         for m in (self.mentor, self.kid):
@@ -1250,6 +1250,25 @@ class DeckTests(unittest.TestCase):
             good = lf.get()
             self.assertEqual(lf.use(bad), good)                                    # a bad layout keeps the one showing
             self.assertEqual(lf.use(seen[1]), json.load(open(seen[1])))
+
+    def test_location_keys_follow_the_displayed_layout(self):
+        pit = [{"handler": "title"}, {"handler": "here", "opts": {"group_by": "location", "locations": ["pit", "stands"]}}]
+        wall = [{"handler": "here"}]
+        shown = {"layout": wall}
+        deck = Deck(self.store, self.state, self.q, lambda: shown["layout"])
+        self.assertEqual(layout_locations(pit), ["pit", "stands"])
+        self.assertEqual([k and k[0] for k in deck.keys(1000)[:3]], [None, None, None])   # shop layout: no locations
+        self.assertEqual(deck.keys(1000)[14][0], "ADMIN")                                  # admin is still there
+        deck.press(0, 1000)
+        self.assertIsNone(PENDING.peek())
+        shown["layout"] = pit                                                              # layout switched (admin key)
+        self.assertEqual([k[0] for k in deck.keys(1001)[:2]], ["pit", "stands"])
+
+    def test_stop_before_start_is_harmless(self):
+        import deck as deckmod
+        deckmod.stop()
+        self.assertTrue(deckmod._stop.is_set())
+        deckmod._stop.clear()
 
     def test_key_images_render(self):
         try:
