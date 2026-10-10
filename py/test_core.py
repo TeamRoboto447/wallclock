@@ -27,6 +27,7 @@ from sync_leantime import (
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
 from nfc import _run_fake, split_here
+from layout import LayoutFile, resolve
 from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
@@ -761,6 +762,62 @@ class GoldenRenderTests(unittest.TestCase):
 
         golden = pygame.image.load(os.path.join(os.path.dirname(__file__), "golden", "wall.png"))
         self.assertEqual(pygame.image.tobytes(render(), "RGB"), pygame.image.tobytes(golden, "RGB"))
+
+
+class LayoutResolveTests(unittest.TestCase):
+    class H:
+        @staticmethod
+        def fit_height(ctx, opts, w, max_h):
+            return opts["want"]
+
+    ctx = type("C", (), {"size": (200, 100)})()
+    get = staticmethod(lambda name: LayoutResolveTests.H)
+
+    def rects(self, layout):
+        return [r for _, r in resolve(layout, self.ctx, self.get)]
+
+    def test_px_refs_fit_and_stretch(self):
+        layout = [
+            {"id": "a", "handler": "h", "x": 10, "y": 5, "w": 50, "h": "fit", "max_h": 30, "opts": {"want": 99}},
+            {"handler": "h", "x": "a.right+4", "y": "a.bottom+2", "right": 150, "bottom": 90},
+        ]
+        self.assertEqual(self.rects(layout), [(10, 5, 50, 30), (64, 37, 86, 53)])  # fit capped at max_h
+
+    def test_bad_modules_are_skipped_not_fatal(self):
+        layout = [
+            {"handler": "h", "x": "later.x", "y": 0, "w": 10, "h": 10},   # unknown/forward id
+            {"handler": "h", "x": 0, "y": 0, "w": 10},                    # no h or bottom
+            {"handler": "h", "x": 500, "y": 0, "w": 10, "h": 10},         # off-screen
+            {"handler": "h", "x": 190, "y": 90, "w": 50, "h": 50},        # clamped
+        ]
+        self.assertEqual(self.rects(layout), [(190, 90, 10, 10)])
+
+    def test_layout_file_reloads_and_keeps_last_good(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "l.json")
+            open(p, "w").write('[{"handler": "a"}]')
+            lf = LayoutFile(p)
+            self.assertEqual(lf.get(), [{"handler": "a"}])
+            open(p, "w").write("{not json")
+            os.utime(p, (1, 1))
+            self.assertEqual(lf.get(), [{"handler": "a"}])   # bad edit: previous layout stays
+            open(p, "w").write('[{"handler": "b"}]')
+            os.utime(p, (2, 2))
+            self.assertEqual(lf.get(), [{"handler": "b"}])
+            self.assertEqual(LayoutFile(os.path.join(d, "missing.json")).get()[0]["handler"], "title")  # default
+
+    def test_broken_handler_only_marks_its_own_rect(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        from layout import Ctx, render as render_layout
+
+        bad = LayoutFile().get() + [{"handler": "nope", "x": 0, "y": 0, "w": 50, "h": 50}]
+        pygame.font.init()
+        f = pygame.font.Font(None, 20)
+        ctx = Ctx((1920, 1080), (f, f, f), 0, [], [], [], "", {}, [], [], ("ok", 3))
+        self.assertEqual(render_layout(bad, ctx).get_size(), (1920, 1080))  # no exception
 
 
 if __name__ == "__main__":

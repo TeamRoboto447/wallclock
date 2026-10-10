@@ -43,7 +43,7 @@ def _who():
 
 def render(size=SIZE):
     import pygame
-    from layout import Ctx, load_layout, render as render_layout
+    from layout import Ctx, LayoutFile, render as render_layout
     from panels import FONT
 
     pygame.font.init()
@@ -51,7 +51,7 @@ def render(size=SIZE):
     fonts = tuple(pygame.font.Font(FONT, n) for n in (40, 32, 22))
     ctx = Ctx(size, fonts, NOW, mentors, students, parents, "Ana Reyes badged in",
               parse_plan(PLAN, today=datetime.date(2026, 10, 8)), parse_md(TODAY), parse_md(PRIORITY), ("ok", 3))
-    return render_layout(load_layout(), ctx)
+    return render_layout(LayoutFile().get(), ctx)
 
 
 def save(path):
