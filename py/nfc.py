@@ -5,7 +5,7 @@ import threading
 import time
 
 from attendance import IN, OUT, now_secs
-from member import Member, Role
+from member import Member, Role, initials_of
 from tts import enrolled_wav_path, play_wav, render_member
 import ndef
 
@@ -24,7 +24,7 @@ CFG_PAGES = {
 def split_here(who):
     mentors, students, parents = [], [], []
     for m, ts in who:
-        row = (m.name, ts, m.enabled, m.closed_secs, m.location)
+        row = (m.name, ts, m.enabled, m.closed_secs, m.location, m.milestone, m.task, m.initials or initials_of(m.name))
         if m.role == Role.MENTOR:
             mentors.append(row)
         elif m.role == Role.PARENT:
@@ -35,7 +35,8 @@ def split_here(who):
 
 
 class PendingLocation:
-    """A location armed by a Stream Deck button (or `tvgui.py location NAME`) for the next badge tap."""
+    """A choice armed by a Stream Deck button (or `tvgui.py location NAME`) for the next badge tap: a location
+    string, or a (milestone, task) tuple for the shop. Strings are normalised, tuples kept as given."""
 
     SECS = 30
 
@@ -45,13 +46,14 @@ class PendingLocation:
         self.until = 0
 
     def arm(self, loc, event_q=None, now=None):
-        loc = " ".join(loc.lower().split())
+        if isinstance(loc, str):
+            loc = " ".join(loc.lower().split())
         if not loc:
             raise ValueError("empty location")
         with self.lock:
             self.loc, self.until = loc, (now or time.time()) + self.SECS
         if event_q is not None:
-            event_q.put(("status", f"{loc}: tap your badge"))
+            event_q.put(("status", f"{choice_label(loc)}: tap your badge"))
             t = threading.Timer(self.SECS, self._expire, (loc, event_q))
             t.daemon = True
             t.start()
@@ -74,7 +76,12 @@ class PendingLocation:
         event_q.put(("status", "Hold your badge over the reader"))
 
 
-PENDING = PendingLocation()
+def choice_label(value):
+    return value if isinstance(value, str) else " › ".join(v for v in value if v)
+
+
+PENDING = PendingLocation()  # location
+WORK = PendingLocation()  # (milestone, task or None) in the shop
 
 
 class AdminLock:
@@ -120,14 +127,27 @@ def tap(store, member, now):
             ADMIN.unlock(now)
             return None, f"Admin unlocked by {known.name}"
         return None, "Admin needs a mentor badge"
-    loc = PENDING.take()
+    loc, work = PENDING.take(), WORK.take()
     inside = store.is_in(member.username)
-    if inside and loc:
-        store.set_location(member.username, loc)
-        return None, f"{member.name} moved to {loc}"
+    if inside and (loc or work):
+        if loc:
+            store.set_location(member.username, loc)
+        if work:
+            store.set_work(member.username, *work)
+        return None, f"{member.name} moved to {choice_label(work) if work else loc}"
     if not inside and not loc and os.environ.get("TVGUI_REQUIRE_LOCATION"):
         return None, "Pick a location first"
-    return store.toggle(member, now, DEBOUNCE, None if inside else loc), None
+    if not inside and not work and os.environ.get("TVGUI_REQUIRE_WORK"):
+        return None, "Pick a project first"
+    punch = store.toggle(member, now, DEBOUNCE, None if inside else loc, None if inside else work)
+    if punch and work and not inside:
+        punch.detail = choice_label(work)
+    return punch, None
+
+
+def punch_status(punch):
+    verb = "badged in" if punch.direction == IN else "badged out"
+    return f"{punch.member.name} {verb}" + (f" · {punch.detail}" if getattr(punch, "detail", None) else "")
 
 
 def _acr_reader():
@@ -517,6 +537,10 @@ def _run_fake(store, enroll_slot, event_q, lines=None):
         if user.startswith("@"):
             PENDING.arm(user[1:], event_q)
             continue
+        if user.startswith("#"):  # '#Milestone' or '#Milestone > task' arms work, like the deck's milestone keys
+            ms, _, task = line.strip()[1:].partition(">")
+            WORK.arm((ms.strip(), task.strip() or None), event_q)
+            continue
         if store.get(user) is None:
             store.upsert(Member(user.title(), user, user, Role.parse(role) or Role.STUDENT))
             store.set_enabled(user, True)
@@ -526,8 +550,7 @@ def _run_fake(store, enroll_slot, event_q, lines=None):
             event_q.put(("here",) + split_here(store.who()))
         if punch:
             event_q.put(("greet", punch.member, punch.direction))
-            verb = "badged in" if punch.direction == IN else "badged out"
-            event_q.put(("status", f"{punch.member.name} {verb}"))
+            event_q.put(("status", punch_status(punch)))
             event_q.put(("here",) + split_here(store.who()))
 
 
@@ -684,8 +707,7 @@ def _run(store, enroll_slot, event_q):
                             except Exception:
                                 pass
                             event_q.put(("greet", punch.member, punch.direction))
-                            verb = "badged in" if punch.direction == IN else "badged out"
-                            event_q.put(("status", f"{punch.member.name} {verb}"))
+                            event_q.put(("status", punch_status(punch)))
                             event_q.put(("here",) + split_here(store.who()))
                             hold_status = False
                         active = member.username

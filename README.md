@@ -105,6 +105,19 @@ reconnects; if a crashed process (kill -9) ever leaves it stuck, unplug and repl
   brightness, back. Admin presses are logged (`admin: ...`).
 - Preview the key images without hardware: `.venv/bin/python py/deck.py sheet /tmp/decksheet.png`.
 
+## Working on a project (shop display)
+
+The shop layout (`py/layouts/shop.json`) has `{"deck": {"pick": "work"}}`, so the Stream Deck offers the active milestones
+(from `plan.md`, with a head-count each), then optionally one of that milestone's **priority** tasks (`priority.md`), plus a GENERAL key.
+Press a key, then badge within 30 s; armed + tap while clocked in switches project. The choice is stored on the open clock-in
+(`punches.milestone`, `punches.task`; current state only, no history). `TVGUI_REQUIRE_WORK=1` refuses clock-ins without a pick
+(toggle it on the admin page: REQUIRE). Without a deck, the laptop fake reader accepts `#Shop Organization > Organize Build Space`.
+
+On screen: the plan chart shows a green counter at the end of each milestone's bar (`"people": "count"` on the plan module) and the
+priority list shows the initials of the people on each task (`"chips": true` on the `md` module). Initials come from the Authentik
+full name at sync (`people.initials`); until the next sync they fall back to letters of the display name.
+Not built yet (designed in the plan): a "working on" board, unassigned highlighting, a roster project column.
+
 ## Locations (pit display)
 
 `py/layouts/pit.json` groups who's-here by location instead of role. A location is armed first

@@ -1,4 +1,5 @@
 [
+  {"deck": {"pick": "location"}},
   {"handler": "image", "x": 0, "y": 0, "w": 1920, "h": 1080, "opts": {"file": "background.jpg", "fit": "cover"}},
   {"handler": "image", "x": 24, "y": 20, "w": 1872, "h": 64, "opts": {"file": "strip.jpg", "fit": "cover"}},
   {"handler": "image", "x": 14, "y": 0, "w": 173, "h": 107, "opts": {"file": "logo.png"}},

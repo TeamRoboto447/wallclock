@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from attendance import IN, OUT, Store, year_start
-from member import Member, Role
+from member import Member, Role, initials_of
 from nfc import AUTH0_USER, cfg_pages_for_storage, tag_pack, tag_pwd
 from plan import parse_md, parse_plan
 from tts import (
@@ -26,8 +26,8 @@ from sync_leantime import (
 )
 from panels import fmt_total, plan_height, today_offset_weeks, today_pages
 from tvgui import enabled_status, newly_enabled
-from nfc import ADMIN, PENDING, _run_fake, split_here, tap
-from deck import Deck, layout_locations, render as render_key
+from nfc import ADMIN, PENDING, WORK, _run_fake, punch_status, split_here, tap
+from deck import Deck, layout_locations, layout_pick, render as render_key
 from layout import next_layout
 from handlers.here import fit_width, groups as here_groups
 from layout import LayoutFile, module_key, resolve
@@ -307,7 +307,7 @@ class SyncTests(unittest.TestCase):
             store.toggle(m, ts)
         self.assertEqual(store.closed_secs(), {"jdoe": 3600})
         _, students, _ = split_here(store.who())
-        self.assertEqual(students, [("Jane Doe", b + 10000, False, 3600, None)])
+        self.assertEqual(students, [("Jane Doe", b + 10000, False, 3600, None, None, None, "JD")])
         self.assertEqual(fmt_total(3600 + 125), "1:02")
         self.assertEqual(fmt_total(37 * 3600 + 1800), "37:30")
 
@@ -758,8 +758,8 @@ class FakeNfcTests(unittest.TestCase):
 
 
 class GoldenRenderTests(unittest.TestCase):
-    """The default screen must not change unless py/golden/wall.png is regenerated on purpose:
-    .venv/bin/python py/tvgui.py render py/golden/wall.png (pixels depend on this machine's FreeSans/pygame)."""
+    """The default screen must not change unless py/golden/shop.png is regenerated on purpose:
+    .venv/bin/python py/tvgui.py render py/golden/shop.png (pixels depend on this machine's FreeSans/pygame)."""
 
     def test_default_screen_matches_golden(self):
         try:
@@ -768,7 +768,7 @@ class GoldenRenderTests(unittest.TestCase):
             self.skipTest("pygame not installed")
         from fixture import render
 
-        golden = pygame.image.load(os.path.join(os.path.dirname(__file__), "golden", "wall.png"))
+        golden = pygame.image.load(os.path.join(os.path.dirname(__file__), "golden", "shop.png"))
         self.assertEqual(pygame.image.tobytes(render(), "RGB"), pygame.image.tobytes(golden, "RGB"))
 
 
@@ -1252,7 +1252,8 @@ class DeckTests(unittest.TestCase):
             self.assertEqual(lf.use(seen[1]), json.load(open(seen[1])))
 
     def test_location_keys_follow_the_displayed_layout(self):
-        pit = [{"handler": "title"}, {"handler": "here", "opts": {"group_by": "location", "locations": ["pit", "stands"]}}]
+        pit = [{"deck": {"pick": "location"}}, {"handler": "title"},
+               {"handler": "here", "opts": {"group_by": "location", "locations": ["pit", "stands"]}}]
         wall = [{"handler": "here"}]
         shown = {"layout": wall}
         deck = Deck(self.store, self.state, self.q, lambda: shown["layout"])
@@ -1278,6 +1279,125 @@ class DeckTests(unittest.TestCase):
         for spec in self.deck.keys(1000) + [("CLOCK OUT", "all 7", (1, 2, 3), (255, 255, 255))]:
             if spec:
                 self.assertEqual(render_key(spec).size, (72, 72))
+
+
+class WorkTests(unittest.TestCase):
+    MS = [f"Milestone {i:02d}" for i in range(14)]
+
+    def setUp(self):
+        import queue
+        import threading
+        ADMIN.armed_until = ADMIN.open_until = 0
+        PENDING.loc = WORK.loc = None
+        self.store = Store(":memory:")
+        self.q = queue.Queue()
+        self.state = {"lock": threading.Lock(), "mentors": [], "students": [], "parents": [], "blanked": False}
+        self.deck = Deck(self.store, self.state, self.q, lambda: [{"deck": {"pick": "work"}}])
+        self.deck._work, self.deck._work_at = (self.MS, {"Milestone 01": ["Fix arm", "Wire it"]}), 1e12
+        self.kid = Member("Kid", "kid", "Kid", Role.STUDENT)
+        self.store.upsert(self.kid)
+
+    def test_store_keeps_work_on_the_open_clock_in_only(self):
+        self.store.toggle(self.kid, 100, 0, work=("Shop Organization", "Organize Build Space"))
+        m = self.store.who()[0][0]
+        self.assertEqual((m.milestone, m.task), ("Shop Organization", "Organize Build Space"))
+        self.store.set_work("kid", "Practice", None)
+        m = self.store.who()[0][0]
+        self.assertEqual((m.milestone, m.task), ("Practice", None))
+        self.store.toggle(self.kid, 200, 0)                                      # out
+        self.store.toggle(self.kid, 300, 0)                                      # in again, nothing picked
+        m = self.store.who()[0][0]
+        self.assertEqual((m.milestone, m.task), (None, None))
+
+    def test_require_work_move_and_status_text(self):
+        import unittest.mock as mock
+        with mock.patch.dict(os.environ, {"TVGUI_REQUIRE_WORK": "1"}):
+            self.assertEqual(tap(self.store, self.kid, 100), (None, "Pick a project first"))
+            WORK.arm(("Shop Organization", "Organize Build Space"))
+            punch, note = tap(self.store, self.kid, 101)
+            self.assertEqual(punch_status(punch), "Kid badged in · Shop Organization › Organize Build Space")
+            WORK.arm(("General", None))
+            self.assertEqual(tap(self.store, self.kid, 200), (None, "Kid moved to General"))
+            self.assertEqual(self.store.who()[0][0].milestone, "General")
+            punch, _ = tap(self.store, self.kid, 300)                             # plain tap clocks out
+            self.assertEqual(punch_status(punch), "Kid badged out")
+
+    def test_milestone_keys_task_page_and_whole_milestone(self):
+        self.state["students"] = [("a", 0, False, 0, None, "Milestone 01", "Fix arm", "A"), ("b", 0, False, 0, None, "Milestone 01", None, "B")]
+        keys = self.deck.keys(1000)
+        self.assertEqual((keys[0][0], keys[0][1]), ("Milestone 00", "0"))
+        self.assertEqual((keys[1][0], keys[1][1]), ("Milestone 01", "2"))
+        self.assertEqual(keys[12][:2], ("NEXT", "1/2"))                           # 14 milestones, 12 per page
+        self.assertEqual((keys[13][0], keys[14][0]), ("GENERAL", "ADMIN"))
+        self.deck.press(1, 1000)                                                  # has priority tasks: opens its page
+        page = self.deck.keys(1001)
+        self.assertEqual([k[0] for k in page[:2]], ["Fix arm", "Wire it"])
+        self.assertEqual(page[2], None)
+        self.assertEqual((page[13][0], page[14][0]), ("WHOLE", "BACK"))
+        self.deck.press(1, 1002)                                                  # arm "Wire it"
+        self.assertEqual(WORK.peek(), ("Milestone 01", "Wire it"))
+        self.assertEqual(self.deck.keys(1003)[1][1], "TAP BADGE")                 # back on the main page, key armed
+        self.deck.press(1, 1004)
+        self.deck.press(13, 1005)                                                 # WHOLE milestone
+        self.assertEqual(WORK.peek(), ("Milestone 01", None))
+        self.deck.press(0, 1006)                                                  # no priority tasks: arms directly
+        self.assertEqual(WORK.peek(), ("Milestone 00", None))
+        self.deck.press(13, 1007)
+        self.assertEqual(WORK.peek(), ("General", None))
+
+    def test_paging_and_task_page_timeout(self):
+        self.deck.press(12, 1000)
+        keys = self.deck.keys(1001)
+        self.assertEqual(keys[0][0], "Milestone 12")
+        self.assertEqual(keys[2], None)                                           # 14 milestones: 2 left on page 2
+        self.deck.press(12, 1002)
+        self.assertEqual(self.deck.keys(1003)[0][0], "Milestone 00")              # wraps to page 1
+        self.deck.press(1, 1004)
+        self.assertEqual(self.deck.keys(1004 + self.deck.VIEW_SECS + 1)[0][0], "Milestone 00")  # task page timed out
+
+    def test_deck_entry_selects_the_mode_and_resolve_ignores_it(self):
+        from layout import resolve
+        layout = [{"deck": {"pick": "work"}}, {"handler": "here", "x": 0, "y": 0, "w": 10, "h": 10}]
+        self.assertEqual(layout_pick(layout), "work")
+        self.assertIsNone(layout_pick([{"handler": "here"}]))
+        ctx = type("C", (), {"size": (100, 100)})()
+        self.assertEqual([r for _, r in resolve(layout, ctx, lambda n: None)], [(0, 0, 10, 10)])
+
+    def test_initials_from_full_names(self):
+        self.assertEqual([initials_of(n) for n in ("Alex Kirby", "Mary Ann Smith", "Cher", "", "ryan m")], ["AK", "MS", "CH", "", "RM"])
+
+    def test_sync_stores_initials_from_the_full_name(self):
+        from sync_authentik import sync
+        u = {"username": "akirby", "name": "Alex Kirby", "type": "internal", "groups_obj": [{"name": "Students"}], "attributes": {}}
+        sync([u], self.store, verbose=False)
+        self.assertEqual(self.store.get("akirby").initials, "AK")
+        self.assertEqual(self.store.get("akirby").name, "Alex")                    # display name stays the short one
+
+    def test_chips_and_gantt_count_render(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        from panels import _draw_chips, _draw_gantt, _draw_md
+
+        pygame.font.init()
+        f = pygame.font.Font(None, 22)
+        surf = pygame.Surface((600, 200))
+        rect = pygame.Rect(0, 0, 600, 200)
+        self.assertEqual(_draw_chips(surf, f, rect, 10, []), 0)
+        used = _draw_chips(surf, f, rect, 10, [("AK", True), ("DT", False)])
+        self.assertTrue(0 < used < rect.width * 0.5)
+        many = _draw_chips(surf, f, rect, 40, [(f"P{i}", False) for i in range(30)])
+        self.assertLessEqual(many, rect.width * 0.5 + 20)                          # overflow becomes "+N", never runs off
+        items = [("h", "Shop Organization"), ("wip", "Organize Build Space")]
+        seen = []
+        _draw_md(surf, rect, "priority", items, f, f, lambda kind, text, heading: seen.append((kind, text, heading)) or [("AK", True)])
+        self.assertEqual(seen, [("h", "Shop Organization", "Shop Organization"), ("wip", "Organize Build Space", "Shop Organization")])
+        plan = {"start": None, "weeks": 4, "title": "", "bars": [("new", "Shop Organization", 1, 3, None, None, 1, None)], "items": []}
+        a, b = pygame.Surface((800, 200)), pygame.Surface((800, 200))
+        _draw_gantt(a, pygame.Rect(0, 0, 800, 200), plan, f, f, 0)
+        _draw_gantt(b, pygame.Rect(0, 0, 800, 200), plan, f, f, 0, {"Shop Organization": 3})
+        self.assertNotEqual(pygame.image.tobytes(a, "RGB"), pygame.image.tobytes(b, "RGB"))  # the pill was drawn
 
 
 if __name__ == "__main__":

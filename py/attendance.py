@@ -62,18 +62,25 @@ class Store:
             self.conn.execute("ALTER TABLE people ADD COLUMN tag_pronounce TEXT")
         except sqlite3.OperationalError:
             pass
-        try:
-            self.conn.execute("ALTER TABLE punches ADD COLUMN location TEXT")
-        except sqlite3.OperationalError:
-            pass
+        for ddl in (
+            "ALTER TABLE punches ADD COLUMN location TEXT",
+            "ALTER TABLE punches ADD COLUMN milestone TEXT",
+            "ALTER TABLE punches ADD COLUMN task TEXT",
+            "ALTER TABLE people ADD COLUMN initials TEXT",
+        ):
+            try:
+                self.conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         self.conn.commit()
 
     def upsert(self, member):
         self.conn.execute(
-            """INSERT INTO people(username, name, pronounce, role) VALUES (?, ?, ?, ?)
+            """INSERT INTO people(username, name, pronounce, role, initials) VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(username) DO UPDATE SET
-                 name=excluded.name, pronounce=excluded.pronounce, role=excluded.role""",
-            (member.username, member.name, member.pronounce, member.role),
+                 name=excluded.name, pronounce=excluded.pronounce, role=excluded.role,
+                 initials=COALESCE(excluded.initials, people.initials)""",
+            (member.username, member.name, member.pronounce, member.role, member.initials),
         )
         self.conn.commit()
 
@@ -168,7 +175,15 @@ class Store:
         )
         self.conn.commit()
 
-    def toggle(self, member, now_secs, debounce_secs=2, location=None):
+    def set_work(self, username, milestone, task):
+        """Switch what someone clocked in is working on (stored on their open IN punch)."""
+        self.conn.execute(
+            "UPDATE punches SET milestone=?, task=? WHERE id=(SELECT MAX(id) FROM punches WHERE username=?) AND direction='in'",
+            (milestone, task, username),
+        )
+        self.conn.commit()
+
+    def toggle(self, member, now_secs, debounce_secs=2, location=None, work=None):
         # The stored record (name, pronunciation, role) is authoritative once a
         # person is known, e.g. from the Authentik sync; a tag only seeds new people.
         tag_pronounce = member.pronounce
@@ -186,22 +201,24 @@ class Store:
             return None
         direction = OUT if row and row[1] == IN else IN
         self.conn.execute(
-            "INSERT INTO punches(username, ts, direction, location) VALUES (?, ?, ?, ?)",
-            (member.username, now_secs, direction, location if direction == IN else None),
+            "INSERT INTO punches(username, ts, direction, location, milestone, task) VALUES (?, ?, ?, ?, ?, ?)",
+            (member.username, now_secs, direction, location if direction == IN else None,
+             *((work or (None, None)) if direction == IN else (None, None))),
         )
         self.conn.commit()
         return Punch(member, direction)
 
     def people(self):
         rows = self.conn.execute(
-            """SELECT username, name, pronounce, role, enabled FROM people
+            """SELECT username, name, pronounce, role, enabled, initials FROM people
                ORDER BY name COLLATE NOCASE"""
         ).fetchall()
         out = []
-        for username, name, pronounce, role, enabled in rows:
+        for username, name, pronounce, role, enabled, initials in rows:
             m = Member.new(name, username, pronounce, Role.parse(role) or Role.STUDENT)
             if m:
                 m.enabled = bool(enabled)
+                m.initials = initials
                 out.append(m)
         return out
 
@@ -221,7 +238,7 @@ class Store:
 
     def who(self):
         rows = self.conn.execute(
-            """SELECT p.username, p.name, p.pronounce, p.role, p.enabled, x.ts, x.location
+            """SELECT p.username, p.name, p.pronounce, p.role, p.enabled, x.ts, x.location, x.milestone, x.task, p.initials
                 FROM people p
                 JOIN (
                   SELECT username, MAX(id) AS id FROM punches GROUP BY username
@@ -232,12 +249,12 @@ class Store:
         ).fetchall()
         out = []
         closed = self.closed_secs(year_start())
-        for username, name, pronounce, role, enabled, ts, location in rows:
+        for username, name, pronounce, role, enabled, ts, location, milestone, task, initials in rows:
             m = Member.new(name, username, pronounce, Role.parse(role) or Role.STUDENT)
             if m:
                 m.enabled = bool(enabled)
                 m.closed_secs = closed.get(username, 0)
-                m.location = location
+                m.location, m.milestone, m.task, m.initials = location, milestone, task, initials
                 out.append((m, ts))
         return out
 

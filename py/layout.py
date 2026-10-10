@@ -49,7 +49,7 @@ def warn(msg):
 
 
 def default_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "layouts", "wall.json")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "layouts", "shop.json")
 
 
 def next_layout(path):
@@ -121,6 +121,8 @@ def resolve(layout, ctx, get=handler):
     placed, out = {}, []
     sw, sh = ctx.size
     for i, m in enumerate(layout):
+        if "deck" in m:  # configuration for the Stream Deck, not a module
+            continue
         name = m.get("handler", "?")
         try:
             x, y = _val(m["x"], placed), _val(m["y"], placed)

@@ -19,6 +19,12 @@ class Role:
         return None
 
 
+def initials_of(full):
+    """'Alex Kirby' -> 'AK' (first + last word); one word -> its first two letters."""
+    parts = (full or "").split()
+    return (parts[0][0] + parts[-1][0] if len(parts) > 1 else (parts[0][:2] if parts else "")).upper()
+
+
 class Member:
     def __init__(self, name, username, pronounce, role):
         self.name = name
@@ -28,6 +34,9 @@ class Member:
         self.enabled = False
         self.closed_secs = 0  # time in completed sessions, set by Store
         self.location = None  # where they clocked in, set by Store.who()
+        self.milestone = None  # what they are working on (milestone / priority task), set by Store.who()
+        self.task = None
+        self.initials = None  # from the full name at sync; initials_of(name) when unknown
 
     def __eq__(self, other):
         return (

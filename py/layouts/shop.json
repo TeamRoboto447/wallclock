@@ -1,10 +1,11 @@
 [
+  {"deck": {"pick": "work"}},
   {"handler": "image", "x": 0, "y": 0, "w": 1920, "h": 1080, "opts": {"file": "background.jpg", "fit": "cover"}},
   {"handler": "image", "x": 24, "y": 20, "w": 1872, "h": 64, "opts": {"file": "strip.jpg", "fit": "cover"}},
   {"handler": "image", "x": 14, "y": 0, "w": 173, "h": 107, "opts": {"file": "logo.png"}},
   {"handler": "here", "x": 24, "y": 104, "h": 788, "id": "here", "w": "fit", "max_w": 620, "opts": {"min_w": 456}},
-  {"id": "plan", "handler": "plan", "x": "here.right+24", "y": 104, "h": "fit", "max_h": 382, "right": 1896},
-  {"handler": "md", "x": "here.right+24", "y": "plan.bottom+24", "w": 684, "bottom": 892, "opts": {"source": "priority", "title": "priority"}, "id": "pri"},
+  {"id": "plan", "handler": "plan", "x": "here.right+24", "y": 104, "h": "fit", "max_h": 382, "right": 1896, "opts": {"people": "count"}},
+  {"handler": "md", "x": "here.right+24", "y": "plan.bottom+24", "w": 684, "bottom": 892, "opts": {"source": "priority", "title": "priority", "chips": true}, "id": "pri"},
   {"handler": "md", "x": "pri.right+24", "y": "plan.bottom+24", "bottom": 892, "opts": {"source": "today", "title": "all tasks", "paged": true}, "right": 1896},
   {"id": "status", "handler": "status", "x": 24, "y": 916, "w": 1872, "h": 140},
   {"handler": "clock", "x": 24, "y": 916, "w": 1872, "h": 140}

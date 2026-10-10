@@ -55,7 +55,8 @@ def _clip_blit(surf, img, pos, rect):
     return True
 
 
-def _draw_md(surf, rect, title, items, font_mid, font_sm):
+def _draw_md(surf, rect, title, items, font_mid, font_sm, chips=None):
+    """chips(kind, text, heading) -> [(initials, enabled)] drawn right-aligned on that row (None = no chips)."""
     import pygame
 
     panel_bg(surf, rect)
@@ -66,21 +67,25 @@ def _draw_md(surf, rect, title, items, font_mid, font_sm):
     if not items:
         _clip_blit(surf, font_sm.render("—", True, MUTED), (x, y), rect)
         return
+    heading = None
     for kind, text in items:
         if y >= rect.bottom - 28:
             break
         if kind == "h":
+            heading = text
             y += 8
             img = font_mid.render(text, True, CORAL)
             if not _clip_blit(surf, img, (x, y), rect):
                 break
+            _draw_chips(surf, font_sm, rect, y + 4, chips(kind, text, heading) if chips else [])
             y += 40
             continue
         mark, color = MD_MARK.get(kind, ("", INK))
         line = f"{mark} {text}".strip()
+        room = max_w - _draw_chips(surf, font_sm, rect, y, chips(kind, text, heading) if chips else [])
         img = font_sm.render(line, True, color)
-        if img.get_width() > max_w:
-            while len(line) > 1 and font_sm.size(line + "…")[0] > max_w:
+        if img.get_width() > room:
+            while len(line) > 1 and font_sm.size(line + "…")[0] > room:
                 line = line[:-1]
             img = font_sm.render(line.rstrip() + "…", True, color)
         if not _clip_blit(surf, img, (x, y), rect):
@@ -99,6 +104,37 @@ def rows_height(groups, cols=1):
 
 def _more(surf, rect, font_sm, x, n):
     surf.blit(font_sm.render(f"+{n} more", True, MUTED), (x, rect.bottom - 30))
+
+
+CHIP_BG = (0x2E, 0x0C, 0x8C)  # brand indigo
+
+
+def _draw_chips(surf, font, rect, y, people):
+    """Initials chips right-aligned on a row (people: [(initials, enabled)]); at most ~40% of the panel width,
+    the rest is summarised as '+N'. Returns the width used (0 for none), so the row text can leave room."""
+    import pygame
+
+    if not people:
+        return 0
+    limit = int(rect.width * 0.4)
+    labels, used = [], 0
+    for i, (ini, enabled) in enumerate(people):
+        w = font.size(ini)[0] + 20
+        if used + w > limit and i < len(people):
+            labels.append((f"+{len(people) - i}", False))
+            break
+        labels.append((ini, enabled))
+        used += w
+    right = rect.right - 16
+    for ini, enabled in labels:
+        img = font.render(ini, True, GREEN if enabled else INK)
+        box = pygame.Rect(0, y, img.get_width() + 14, 24)
+        box.right = right
+        pygame.draw.rect(surf, CHIP_BG, box, border_radius=RADIUS)
+        pygame.draw.rect(surf, BORDER, box, 1, border_radius=RADIUS)
+        surf.blit(img, (box.x + 7, box.y + (box.height - img.get_height()) // 2))
+        right = box.x - 6
+    return rect.right - 16 - right + 8
 
 
 def _draw_here(surf, rect, groups, font_sm, now, times=True, cols=1):
@@ -204,7 +240,8 @@ def today_offset_weeks(start, weeks, now):
     return days / 7 if 0 <= days < weeks * 7 else None
 
 
-def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
+def _draw_gantt(surf, rect, plan, font_mid, font_sm, now, badges=None):
+    """badges: {bar name: people working on it now}, drawn as a small green pill at the end of the bar."""
     import pygame
 
     panel_bg(surf, rect)
@@ -252,6 +289,7 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
     for status, name, lo, hi, d0, d1, bid, bdep in bars:
         if y + row_h > grid.bottom:
             break
+        full = name
         if font_sm.size(name)[0] > label_w - 12:
             while len(name) > 1 and font_sm.size(name + "…")[0] > label_w - 12:
                 name = name[:-1]
@@ -267,6 +305,13 @@ def _draw_gantt(surf, rect, plan, font_mid, font_sm, now):
                 x1 = int(grid.x + hi * col_w) - 3
             bar = pygame.Rect(x0, y + 6, max(4, x1 - x0), row_h - 12)
             pygame.draw.rect(surf, STATUS_COLOR.get(status, BLUE), bar)
+            if (badges or {}).get(full):
+                img = font_sm.render(str(badges[full]), True, PANEL)
+                w = max(26, img.get_width() + 14)
+                px = bar.right + 6 if bar.right + 6 + w <= grid.right - 2 else bar.right - w - 4  # inside a bar that reaches the edge
+                pill = pygame.Rect(px, y + 5, w, row_h - 10)
+                pygame.draw.rect(surf, GREEN, pill, border_radius=RADIUS)
+                surf.blit(img, (pill.x + (w - img.get_width()) // 2, pill.y + (pill.height - img.get_height()) // 2))
             if bid is not None:
                 placed[bid] = (y, bar.left, bar.right, status, bdep)
         y += row_h

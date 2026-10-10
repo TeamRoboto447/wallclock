@@ -13,7 +13,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from attendance import Store, db_path
-from member import Member, Role
+from member import Member, Role, initials_of
 
 DEFAULT_URL = "https://members.teamroboto.org"
 ENABLED_GROUP = "Enabled"
@@ -97,15 +97,16 @@ def sync(users, store, dry_run=False, verbose=True):
     names = display_names([(m.name, badge_name(u)) for u, m, _ in converted])
     badge_says = {u: t for u, _, _, t in store.tag_pronunciations() if t}
     for (u, m, enabled), display in zip(converted, names):
+        m.initials = initials_of(m.name)  # m.name is still the full name here
         m.name = display
         if not authentik_pronunciation(u) and m.username in badge_says:
             m.pronounce = badge_says[m.username]  # better than the bare full name
         old = known.get(m.username)
         if old is None:
             added += 1
-        elif old != m or old.enabled != enabled:
+        elif old != m or old.enabled != enabled or old.initials != m.initials:
             updated += 1
-        changed = old is None or old != m or old.enabled != enabled
+        changed = old is None or old != m or old.enabled != enabled or old.initials != m.initials
         if changed and not dry_run:
             store.upsert(m)
             store.set_enabled(m.username, enabled)
