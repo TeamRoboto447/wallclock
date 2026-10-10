@@ -4,9 +4,10 @@ import datetime
 import pygame
 
 import nexus
-from panels import BEIGE, BLUE, GREEN, INK, LTRED, MUTED, PANEL, draw_freshness
+from panels import BEIGE, BLUE, CORAL, GREEN, INK, LTRED, PANEL, YELLOW, draw_freshness
 
 INTERVAL = 15
+TAGS = {"On field": ("FIELD", GREEN), "On deck": ("DECK", YELLOW), "Now queuing": ("QUEUE", CORAL)}  # other statuses show the time
 
 
 def refresh(opts):
@@ -27,10 +28,11 @@ def draw(surf, rect, ctx, opts):
             break
         start = m.get("times", {}).get("estimatedStartTime")
         clock = datetime.datetime.fromtimestamp(start / 1000).strftime("%I:%M").lstrip("0") if start else ""
+        tag, tag_color = TAGS.get(m.get("status"), (clock, BEIGE))
         x = rect.x + 20
         for text, color, w in (
-            (m["label"], GREEN if mine else INK, 200),
-            (clock, BEIGE, 90),
+            (m["label"], GREEN if mine else INK, 190),
+            (tag, tag_color, 100),
             (" ".join(m["redTeams"]), LTRED, 190),
             (" ".join(m["blueTeams"]), BLUE, 190),
         ):

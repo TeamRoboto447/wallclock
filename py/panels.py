@@ -299,3 +299,11 @@ def draw_freshness(surf, rect, font, f, now, stale_after):
         return
     img = font.render(text, True, color)
     surf.blit(img, (rect.right - 16 - img.get_width(), rect.y + 16))
+
+
+def clip_text(font, text, max_w):
+    if font.size(text)[0] <= max_w:
+        return text
+    while len(text) > 1 and font.size(text + "…")[0] > max_w:
+        text = text[:-1]
+    return text.rstrip() + "…"
