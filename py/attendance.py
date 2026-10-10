@@ -35,6 +35,17 @@ class Store:
                 direction TEXT NOT NULL
             )"""
         )
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS punch_edits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                punch_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                old_ts INTEGER NOT NULL,
+                new_ts INTEGER NOT NULL,
+                edited_at INTEGER NOT NULL,
+                note TEXT NOT NULL DEFAULT ''
+            )"""
+        )
         try:
             self.conn.execute(
                 "ALTER TABLE people ADD COLUMN role TEXT NOT NULL DEFAULT 'student'"
@@ -86,6 +97,55 @@ class Store:
             """SELECT username, name, pronounce, tag_pronounce FROM people
                WHERE tag_pronounce IS NOT NULL ORDER BY name COLLATE NOCASE"""
         ).fetchall()
+
+    def recent_punches(self, username=None, limit=10):
+        """Newest first: [{id, username, direction, ts, edits}] where edits is the
+        number of times the punch has been corrected."""
+        where, args = ("WHERE x.username=?", (username,)) if username else ("", ())
+        rows = self.conn.execute(
+            f"""SELECT x.id, x.username, x.direction, x.ts,
+                       (SELECT COUNT(*) FROM punch_edits e WHERE e.punch_id = x.id)
+                FROM punches x {where} ORDER BY x.id DESC LIMIT ?""",
+            args + (limit,),
+        ).fetchall()
+        return [dict(zip(("id", "username", "direction", "ts", "edits"), r)) for r in rows]
+
+    def punch_edits(self, punch_id):
+        return self.conn.execute(
+            "SELECT old_ts, new_ts, edited_at, note FROM punch_edits WHERE punch_id=? ORDER BY id",
+            (punch_id,),
+        ).fetchall()
+
+    def edit_punch(self, punch_id, new_ts, note="", now=None):
+        """Move one punch to new_ts, keeping its place in the person's sequence
+        and recording the original time in punch_edits. Returns the old time."""
+        now = int(time.time()) if now is None else now
+        row = self.conn.execute(
+            "SELECT username, ts FROM punches WHERE id=?", (punch_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"no punch with id {punch_id}")
+        username, old_ts = row
+        if new_ts > now:
+            raise ValueError("that time is in the future")
+        prev = self.conn.execute(
+            "SELECT MAX(ts) FROM punches WHERE username=? AND id<?", (username, punch_id)
+        ).fetchone()[0]
+        nxt = self.conn.execute(
+            "SELECT MIN(ts) FROM punches WHERE username=? AND id>?", (username, punch_id)
+        ).fetchone()[0]
+        if prev is not None and new_ts <= prev:
+            raise ValueError("that is not after this person's previous punch")
+        if nxt is not None and new_ts >= nxt:
+            raise ValueError("that is not before this person's next punch")
+        self.conn.execute(
+            "INSERT INTO punch_edits(punch_id, username, old_ts, new_ts, edited_at, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (punch_id, username, old_ts, new_ts, now, note),
+        )
+        self.conn.execute("UPDATE punches SET ts=? WHERE id=?", (new_ts, punch_id))
+        self.conn.commit()
+        return old_ts
 
     def get(self, username):
         return next((p for p in self.people() if p.username == username), None)

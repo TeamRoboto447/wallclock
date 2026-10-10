@@ -1,5 +1,6 @@
 import hashlib
 import os
+import sys
 import threading
 import time
 
@@ -408,8 +409,29 @@ class EnrollSlot:
             self.job = None
 
 
+def _run_fake(store, enroll_slot, event_q, lines=None):
+    """Laptop stand-in for the reader (TVGUI_FAKE_NFC=1): each stdin line is
+    'username[:role]' and acts like a badge tap. Unknown users are created.
+    shortcut: no enroll or tag writes, use the real reader for those."""
+    event_q.put(("status", "Hold your badge over the reader"))
+    for line in lines if lines is not None else sys.stdin:
+        user, _, role = line.strip().partition(":")
+        if not user:
+            continue
+        if store.get(user) is None:
+            store.upsert(Member(user.title(), user, user, Role.parse(role) or Role.STUDENT))
+            store.set_enabled(user, True)
+        punch = store.toggle(store.get(user), now_secs(), DEBOUNCE)
+        if punch:
+            event_q.put(("greet", punch.member, punch.direction))
+            verb = "badged in" if punch.direction == IN else "badged out"
+            event_q.put(("status", f"{punch.member.name} {verb}"))
+            event_q.put(("here",) + split_here(store.who()))
+
+
 def start(store, enroll_slot, event_q):
-    t = threading.Thread(target=_run, args=(store, enroll_slot, event_q), daemon=True)
+    run = _run_fake if os.environ.get("TVGUI_FAKE_NFC") else _run
+    t = threading.Thread(target=run, args=(store, enroll_slot, event_q), daemon=True)
     t.start()
     return t
 

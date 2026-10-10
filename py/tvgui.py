@@ -15,6 +15,7 @@ from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from netstatus import probe as net_probe
 from nfc import EnrollSlot, split_here, start as nfc_start
+from punches import fix_punch, list_punches
 from plan import current_week, load_md, load_plan, plan_path, priority_path, today_path
 from tts import backfill, play_enabled, play_greet, say, say_ready
 
@@ -51,6 +52,12 @@ def usage():
         file=sys.stderr,
     )
     print("tvgui.py blank|unblank|status|dump|scan|tts-backfill", file=sys.stderr)
+    print("tvgui.py punches [USER] [--limit N]", file=sys.stderr)
+    print(
+        "tvgui.py fix-punch USER TIME [--date YYYY-MM-DD] [--note TEXT] [--dry-run]"
+        "   (TIME: 3:25pm or 15:25; fixes USER's latest punch)",
+        file=sys.stderr,
+    )
 
 
 def blank_secs():
@@ -142,12 +149,16 @@ def open_display():
 
     pygame.init()
     fullscreen = bool(os.environ.get("DISPLAY"))
-    if fullscreen:
+    if os.environ.get("TVGUI_WINDOWED"):  # laptop: resizable window instead of fullscreen
+        win = Window("Team Roboto", size=(W // 2, H // 2), resizable=True)
+    elif fullscreen:
         win = Window("Team Roboto", size=(W, H), fullscreen=True)
     else:
         os.environ.setdefault("SDL_VIDEODRIVER", "kmsdrm")
         win = Window("Team Roboto", size=(W, H), fullscreen=True)
     renderer = Renderer(win)
+    if os.environ.get("TVGUI_WINDOWED"):
+        renderer.logical_size = (W, H)
     print(f"display {win.size} driver={pygame.display.get_driver()}", flush=True)
     return win, renderer
 
@@ -766,6 +777,32 @@ def main():
             print(f"enrolled {m.username}")
         except Exception as e:
             print(f"enroll: {e}", file=sys.stderr)
+            usage()
+            sys.exit(1)
+    elif cmd == "punches":
+        rest = args[1:]
+        limit = 10
+        if "--limit" in rest:
+            i = rest.index("--limit")
+            limit = int(rest[i + 1])
+            del rest[i : i + 2]
+        print("\n".join(list_punches(Store(db_path()), rest[0] if rest else None, limit)))
+    elif cmd == "fix-punch":
+        try:
+            rest = args[1:]
+            opts = {"--date": None, "--note": ""}
+            for flag in opts:
+                if flag in rest:
+                    i = rest.index(flag)
+                    opts[flag] = rest[i + 1]
+                    del rest[i : i + 2]
+            dry = "--dry-run" in rest
+            rest = [r for r in rest if r != "--dry-run"]
+            if len(rest) != 2:
+                raise ValueError("need USER and TIME")
+            print("\n".join(fix_punch(Store(db_path()), rest[0], rest[1], opts["--date"], opts["--note"], dry)))
+        except (ValueError, IndexError) as e:
+            print(f"fix-punch: {e}", file=sys.stderr)
             usage()
             sys.exit(1)
     elif cmd in ("-h", "--help"):

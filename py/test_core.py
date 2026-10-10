@@ -27,7 +27,8 @@ from sync_leantime import (
 from tvgui import (
     enabled_status, fmt_total, newly_enabled, plan_height, today_offset_weeks, today_pages,
 )
-from nfc import split_here
+from nfc import _run_fake, split_here
+from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
 from netwatch import action_for, decode_throttled
 
@@ -321,6 +322,55 @@ class SyncTests(unittest.TestCase):
         a, b = Member.new("Ann", "a"), Member.new("Bo", "b")
         self.assertEqual(enabled_status([a]), "Ann is now enabled")
         self.assertEqual(enabled_status([a, b]), "Ann and Bo are now enabled")
+
+    def test_parse_time_of_day(self):
+        self.assertEqual(parse_time_of_day("3:25pm"), (15, 25))
+        self.assertEqual(parse_time_of_day("3:25 PM"), (15, 25))
+        self.assertEqual(parse_time_of_day("12:05am"), (0, 5))
+        self.assertEqual(parse_time_of_day("3pm"), (15, 0))
+        self.assertEqual(parse_time_of_day("15:25"), (15, 25))
+        self.assertEqual(parse_time_of_day("03:25"), (3, 25))   # leading zero: 24-hour
+        for bad in ("3:25", "9:00", "25:00", "noon", ""):        # ambiguous or unreadable
+            with self.assertRaises(ValueError):
+                parse_time_of_day(bad)
+
+    def test_fix_punch_corrects_the_latest_punch_and_keeps_the_original(self):
+        store = Store(":memory:")
+        m = Member.new("Jane Doe", "jdoe")
+        day = datetime.datetime(2026, 10, 7)
+        at = lambda h, mi=0, s=0: int(day.replace(hour=h, minute=mi, second=s).timestamp())
+        store.toggle(m, at(9))        # in
+        store.toggle(m, at(11))       # out
+        store.toggle(m, at(15, 56, 4))  # in, the late badge-in
+        now = at(16)
+        lines = fix_punch(store, "jdoe", "3:25pm", note="forgot to badge", now=now)
+        self.assertTrue(lines[-1].startswith("done"))
+        latest = store.recent_punches("jdoe", 1)[0]
+        self.assertEqual((latest["direction"], latest["ts"], latest["edits"]), ("in", at(15, 25), 1))
+        old, new, _, note = store.punch_edits(latest["id"])[0]
+        self.assertEqual((old, new, note), (at(15, 56, 4), at(15, 25), "forgot to badge"))
+        self.assertIn("(corrected 1x)", list_punches(store, "jdoe")[0])
+        self.assertEqual(store.closed_secs(), {"jdoe": 2 * 3600})   # the 9-11 session is untouched
+
+    def test_fix_punch_refuses_bad_changes_and_dry_run_changes_nothing(self):
+        store = Store(":memory:")
+        m = Member.new("Jane Doe", "jdoe")
+        day = datetime.datetime(2026, 10, 7)
+        at = lambda h, mi=0: int(day.replace(hour=h, minute=mi).timestamp())
+        store.toggle(m, at(9))
+        store.toggle(m, at(11))
+        store.toggle(m, at(15))
+        now = at(16)
+        for bad, why in (("10:30am", "previous"), ("5pm", "future"), ("3pm", "already")):
+            with self.assertRaises(ValueError) as ctx:
+                fix_punch(store, "jdoe", bad, now=now)
+            self.assertIn(why, str(ctx.exception))
+        with self.assertRaises(ValueError):
+            fix_punch(store, "nobody", "3pm", now=now)
+        lines = fix_punch(store, "jdoe", "2:30pm", dry_run=True, now=now)
+        self.assertEqual(lines[-1], "dry run: nothing changed")
+        self.assertEqual(store.recent_punches("jdoe", 1)[0]["ts"], at(15))
+        self.assertEqual(store.recent_punches("jdoe", 1)[0]["edits"], 0)
 
     def test_totals_reset_at_january_first(self):
         store = Store(":memory:")
@@ -683,6 +733,20 @@ class NetTests(unittest.TestCase):
         self.assertEqual(decode_throttled(0), ["ok"])
         self.assertEqual(decode_throttled(0x50005),
                          ["undervoltage now", "throttled now", "undervoltage since boot", "throttled since boot"])
+
+
+class FakeNfcTests(unittest.TestCase):
+    def test_taps_toggle_and_create(self):
+        import queue
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "a.sqlite"))
+            q = queue.Queue()
+            _run_fake(store, None, q, ["alice:mentor\n", "\n"])
+            kinds = [q.get_nowait() for _ in range(q.qsize())]
+            self.assertEqual(kinds[1][0], "greet")
+            self.assertEqual(kinds[1][2], IN)
+            self.assertEqual(store.get("alice").role, Role.MENTOR)
+            self.assertEqual([m.username for m, _ in store.who()], ["alice"])
 
 
 if __name__ == "__main__":
