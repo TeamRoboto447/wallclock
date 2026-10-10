@@ -1,6 +1,7 @@
 """Who's here. opts: group_by = "role" (default) | "location"; locations = headings in order (location mode);
-times = false hides the meeting/total columns. Supports w="fit"."""
-from panels import _draw_here
+times = false -> no time columns, names flow as wrapped text; min_w = narrowest width for w="fit".
+With time columns, a panel at least 2*COL_W wide puts each section's names in two columns."""
+from panels import COL_W, _draw_here, _draw_here_flow, rows_height
 
 
 def groups(ctx, opts):
@@ -18,13 +19,22 @@ def groups(ctx, opts):
     return out + ([(f"unassigned ({len(lost)})", lost)] if lost else [])
 
 
-def fit_width(ctx, opts, max_w):
-    """Wide enough for the longest name or heading (plus the time columns if shown)."""
+def fit_width(ctx, opts, max_w, h=None):
+    """Wide enough for the longest name; with time columns, two columns once one column would not fit in h."""
     size = lambda t: ctx.font_sm.size(t)[0]
     gs = groups(ctx, opts)
     widest = max([size("who's here")] + [size(label) for label, _ in gs] + [size(r[0]) for _, rows in gs for r in rows])
-    return min(max_w, max(220, widest + 40 + (0 if opts.get("times") is False else 210)))
+    min_w = opts.get("min_w", 220)
+    if opts.get("times") is False:
+        return min(max_w, max(min_w, widest + 40))
+    if rows_height(gs) > (h or 788) - 52:
+        return min(max_w, max(min_w, 2 * COL_W + 16))
+    return min(max_w, max(min_w, widest + 250))
 
 
 def draw(surf, rect, ctx, opts):
-    _draw_here(surf, rect, groups(ctx, opts), ctx.font_sm, ctx.now, opts.get("times", True))
+    gs = groups(ctx, opts)
+    if opts.get("times") is False:
+        _draw_here_flow(surf, rect, gs, ctx.font_sm)
+    else:
+        _draw_here(surf, rect, gs, ctx.font_sm, ctx.now, True, 2 if rect.width >= 2 * COL_W + 16 else 1)

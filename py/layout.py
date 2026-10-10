@@ -111,8 +111,9 @@ def resolve(layout, ctx, get=handler):
         name = m.get("handler", "?")
         try:
             x, y = _val(m["x"], placed), _val(m["y"], placed)
-            if m.get("w") == "fit":
-                w = min(m["max_w"], get(name).fit_width(ctx, m.get("opts", {}), m["max_w"]))
+            if m.get("w") == "fit":  # fit_width gets the height (None if that is "fit" too) to decide on columns
+                h0 = None if m.get("h") == "fit" else _val(m["h"], placed) if "h" in m else _val(m["bottom"], placed) - y
+                w = min(m["max_w"], get(name).fit_width(ctx, m.get("opts", {}), m["max_w"], h0))
             else:
                 w = _val(m["w"], placed) if "w" in m else _val(m["right"], placed) - x
             if m.get("h") == "fit":

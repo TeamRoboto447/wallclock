@@ -2,7 +2,7 @@
   {"handler": "image", "x": 0, "y": 0, "w": 1920, "h": 1080, "opts": {"file": "background.jpg", "fit": "cover"}},
   {"handler": "image", "x": 24, "y": 20, "w": 1872, "h": 64, "opts": {"file": "strip.jpg", "fit": "cover"}},
   {"handler": "image", "x": 14, "y": 0, "w": 173, "h": 107, "opts": {"file": "logo.png"}},
-  {"id": "here", "handler": "here", "x": 24, "y": 104, "w": "fit", "max_w": 560, "h": 788, "opts": {"group_by": "location", "times": false, "locations": ["pit", "practice field", "stands", "field", "cafeteria"]}},
+  {"id": "here", "handler": "here", "x": 24, "y": 104, "w": "fit", "max_w": 560, "h": 788, "opts": {"group_by": "location", "times": false, "locations": ["pit", "practice field", "stands", "field", "cafeteria"], "min_w": 300}},
   {"id": "next", "handler": "nexus_next", "x": "here.right+24", "y": 104, "right": 1896, "h": 96},
   {"id": "parts", "handler": "nexus_feed", "x": "here.right+24", "y": "next.bottom+24", "w": 560, "h": 334, "opts": {"kind": "parts"}},
   {"id": "sched", "handler": "nexus_schedule", "x": "parts.right+24", "y": "next.bottom+24", "right": 1896, "h": 334},

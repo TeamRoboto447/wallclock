@@ -31,7 +31,7 @@ from handlers.here import fit_width, groups as here_groups
 from layout import LayoutFile, module_key, resolve
 from refresh import Refresher
 import nexus
-from panels import age_text, border_state, wrap_text
+from panels import age_text, border_state, rows_height, wrap_text
 import slack
 from handlers.image import fit_size
 from punches import fix_punch, list_punches, parse_time_of_day
@@ -988,7 +988,7 @@ class FitWidthTests(unittest.TestCase):
 
     def test_resolver_places_modules_after_a_fit_width_module(self):
         import types
-        H = types.SimpleNamespace(fit_width=lambda ctx, opts, max_w: 300)
+        H = types.SimpleNamespace(fit_width=lambda ctx, opts, max_w, h: 300 if h == 50 else 0)  # h must be passed through
         layout = [{"id": "r", "handler": "h", "x": 24, "y": 0, "w": "fit", "max_w": 560, "h": 50},
                   {"handler": "h", "x": "r.right+24", "y": 0, "right": 600, "h": 10}]
         ctx = type("C", (), {"size": (1000, 100)})()
@@ -1108,6 +1108,45 @@ class ImageTests(unittest.TestCase):
         ctx = Ctx((400, 300), (f, f, f), 0, [], [], [], "", {}, [], [], ("ok", 3))
         layout = [{"handler": "image", "x": 0, "y": 0, "w": 100, "h": 100, "opts": {"file": "no-such-file.png"}}]
         self.assertEqual(render_layout(layout, ctx).get_size(), (400, 300))   # no exception
+
+
+class RosterOverflowTests(unittest.TestCase):
+    def people(self, n, loc="pit"):
+        return [(f"Person {i:02d}", 0, i % 2 == 0, 3600, loc) for i in range(n)]
+
+    def test_rows_height_halves_with_two_columns(self):
+        gs = [("a (13)", self.people(13)), ("b (0)", [])]
+        self.assertEqual(rows_height(gs, 1), (32 + 13 * 30 + 10) + (32 + 10))
+        self.assertEqual(rows_height(gs, 2), (32 + 7 * 30 + 10) + (32 + 10))   # ceil(13/2) rows
+
+    def test_wall_roster_goes_to_two_columns_only_when_one_does_not_fit(self):
+        class F:
+            @staticmethod
+            def size(t):
+                return (10 * len(t), 20)
+        c = type("C", (), {})()
+        c.font_sm, c.mentors, c.parents, c.students = F, [], [], self.people(8)
+        opts = {"min_w": 456}
+        self.assertEqual(fit_width(c, opts, 620, 788), 456)                    # 8 people fit one column
+        c.students = self.people(26)
+        self.assertEqual(fit_width(c, opts, 620, 788), 616)                    # 26 do not: 2 * COL_W + 16
+        self.assertEqual(fit_width(c, {"min_w": 300, "times": False}, 620, 788), 300)  # flow mode never widens
+
+    def test_many_people_render_in_both_modes(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        from panels import _draw_here, _draw_here_flow
+
+        pygame.font.init()
+        f = pygame.font.Font(None, 22)
+        gs = [(f"s{k} ({len(g)})", g) for k, g in enumerate([self.people(13), self.people(7), self.people(6)])]
+        for fn in (lambda s, r: _draw_here(s, r, gs, f, 1000, True, 2),
+                   lambda s, r: _draw_here(s, r, gs, f, 1000, True, 1),      # too tall for 1 column: must not crash
+                   lambda s, r: _draw_here_flow(s, r, gs, f)):
+            surf = pygame.Surface((700, 800))
+            fn(surf, pygame.Rect(10, 10, 616, 788))
 
 
 if __name__ == "__main__":

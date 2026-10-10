@@ -88,49 +88,110 @@ def _draw_md(surf, rect, title, items, font_mid, font_sm):
         y += 32
 
 
-def _draw_here(surf, rect, groups, font_sm, now, times=True):
-    """groups: [(heading, rows)], rows = (name, ts, enabled, closed_secs, ...)."""
+ROW_H, HEAD_H, GAP = 30, 32, 10  # roster row, section heading and gap between sections
+COL_W = 300  # width of one column when a section's names are split in two
+
+
+def rows_height(groups, cols=1):
+    """Height of the roster rows for `cols` columns of names under each heading."""
+    return sum(HEAD_H + -(-len(rows) // cols) * ROW_H + GAP for _, rows in groups)
+
+
+def _more(surf, rect, font_sm, x, n):
+    surf.blit(font_sm.render(f"+{n} more", True, MUTED), (x, rect.bottom - 30))
+
+
+def _draw_here(surf, rect, groups, font_sm, now, times=True, cols=1):
+    """groups: [(heading, rows)], rows = (name, ts, enabled, closed_secs, ...). With cols=2 each heading
+    stays whole and its names run down two columns, each with its own time cells."""
     import pygame
 
     panel_bg(surf, rect)
     surf.blit(font_sm.render("who's here", True, BEIGE), (rect.x + 20, rect.y + 16))
-    total_r = rect.right - 20
-    meet_r = total_r - 100
     grid_top = rect.y + 46
-    if times:
-        for label, right in (("meeting", meet_r), ("total", total_r)):
-            img = font_sm.render(label, True, MUTED)
-            surf.blit(img, (right - img.get_width(), rect.y + 16))
-        for gx in (meet_r - 78, meet_r + 22):
-            pygame.draw.line(surf, GRID, (gx, grid_top), (gx, rect.bottom - 8), 1)
     pygame.draw.line(surf, GRID, (rect.x + 8, grid_top), (rect.right - 8, grid_top), 1)
+    tw, reserve = (100, 84) if cols == 1 else (72, 58)  # spacing of the time columns / room kept left of them
+    labels = ("meeting", "total") if cols == 1 else ("mtg", "total")
+    cw = (rect.width - 16) / cols
+    spans = []  # per column: name x, left edge, right edge, meeting right edge, total right edge
+    for i in range(cols):
+        c0, c1 = rect.x + 8 + round(i * cw), rect.x + 8 + round((i + 1) * cw)
+        total_r = c1 - 12
+        spans.append((c0 + 12, c0, c1, total_r - tw, total_r))
+        if times:
+            for label, right in zip(labels, (total_r - tw, total_r)):
+                img = font_sm.render(label, True, MUTED)
+                surf.blit(img, (right - img.get_width(), rect.y + 16))
+            for gx in (total_r - tw - tw + 22, total_r - tw + 22):
+                pygame.draw.line(surf, GRID, (gx, grid_top), (gx, rect.bottom - 8), 1)
     y = rect.y + 52
-    x = rect.x + 20
-    for label, names in groups:
-        if y >= rect.bottom - 28:
-            break
+    skipped = 0
+    for gi, (label, names) in enumerate(groups):
         img = font_sm.render(label, True, CORAL)
-        if not _clip_blit(surf, img, (x, y), rect):
+        if y >= rect.bottom - 28 or not _clip_blit(surf, img, (spans[0][0], y), rect):
+            skipped += sum(len(r) for _, r in groups[gi:])
             break
-        y += 32
-        for name, ts, enabled, closed, *_ in names:
-            color = GREEN if enabled else INK
-            max_name = meet_r - 84 - x if times else rect.right - 20 - x
-            while len(name) > 1 and font_sm.size(name)[0] > max_name:
+        y += HEAD_H
+        per = -(-len(names) // cols)
+        for ci, (x, c0, c1, meet_r, total_r) in enumerate(spans):
+            for k, (name, ts, enabled, closed, *_) in enumerate(names[ci * per:(ci + 1) * per]):
+                yy = y + k * ROW_H
+                max_name = meet_r - reserve - x if times else c1 - 12 - x
+                while len(name) > 1 and font_sm.size(name)[0] > max_name:
+                    name = name[:-1]
+                ns = font_sm.render(name, True, GREEN if enabled else INK)
+                if not _clip_blit(surf, ns, (x, yy), rect):
+                    skipped += 1
+                    continue
+                if times:
+                    meet = font_sm.render(fmt_in(ts, now), True, BEIGE)
+                    tot = font_sm.render(fmt_total(closed + max(0, now - max(int(ts), year_start(now)))), True, BEIGE)
+                    surf.blit(meet, (meet_r - meet.get_width(), yy))
+                    surf.blit(tot, (total_r - tot.get_width(), yy))
+                pygame.draw.line(surf, GRID, (c0, yy + 28), (c1, yy + 28), 1)
+        y += per * ROW_H + GAP
+    if skipped:
+        _more(surf, rect, font_sm, spans[0][0], skipped)
+
+
+def _draw_here_flow(surf, rect, groups, font_sm):
+    """No time columns: each heading is followed by its names as ' · '-separated text wrapped to the panel."""
+    import pygame
+
+    panel_bg(surf, rect)
+    surf.blit(font_sm.render("who's here", True, BEIGE), (rect.x + 20, rect.y + 16))
+    pygame.draw.line(surf, GRID, (rect.x + 8, rect.y + 46), (rect.right - 8, rect.y + 46), 1)
+    x0, x1 = rect.x + 20, rect.right - 20
+    sep_w = font_sm.size(" · ")[0]
+    y = rect.y + 52
+    skipped = 0
+    for gi, (label, names) in enumerate(groups):
+        if y + ROW_H > rect.bottom - 8:
+            skipped += sum(len(r) for _, r in groups[gi:])
+            break
+        surf.blit(font_sm.render(label, True, CORAL), (x0, y))
+        y += HEAD_H
+        x = x0
+        for i, (name, _ts, enabled, *_) in enumerate(names):
+            while len(name) > 1 and font_sm.size(name)[0] > x1 - x0:
                 name = name[:-1]
-            ns = font_sm.render(name, True, color)
-            if not _clip_blit(surf, ns, (x, y), rect):
-                return
-            if times:
-                meet = font_sm.render(fmt_in(ts, now), True, BEIGE)
-                tot = font_sm.render(
-                    fmt_total(closed + max(0, now - max(int(ts), year_start(now)))), True, BEIGE
-                )
-                surf.blit(meet, (meet_r - meet.get_width(), y))
-                surf.blit(tot, (total_r - tot.get_width(), y))
-            pygame.draw.line(surf, GRID, (rect.x + 8, y + 28), (rect.right - 8, y + 28), 1)
-            y += 30
-        y += 10
+            w = font_sm.size(name)[0]
+            if i and x + sep_w + w <= x1:
+                surf.blit(font_sm.render(" · ", True, MUTED), (x, y))
+                x += sep_w
+            elif i:
+                x, y = x0, y + ROW_H
+            if y + ROW_H > rect.bottom - 8:
+                skipped += len(names) - i + sum(len(r) for _, r in groups[gi + 1:])
+                break
+            surf.blit(font_sm.render(name, True, GREEN if enabled else INK), (x, y))
+            x += w
+        else:
+            y += (ROW_H if names else 0) + GAP
+            continue
+        break
+    if skipped:
+        _more(surf, rect, font_sm, x0, skipped)
 
 
 def today_offset_weeks(start, weeks, now):
