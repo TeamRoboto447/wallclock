@@ -1,0 +1,9 @@
+[
+  {"handler": "title", "x": 24, "y": 24, "w": 400, "h": 40},
+  {"handler": "here", "x": 24, "y": 80, "w": 456, "h": 812},
+  {"id": "plan", "handler": "plan", "x": 504, "y": 80, "w": 1392, "h": "fit", "max_h": 394},
+  {"handler": "md", "x": 504, "y": "plan.bottom+24", "w": 684, "bottom": 892, "opts": {"source": "priority", "title": "priority"}},
+  {"handler": "md", "x": 1212, "y": "plan.bottom+24", "w": 684, "bottom": 892, "opts": {"source": "today", "title": "all tasks", "paged": true}},
+  {"id": "status", "handler": "status", "x": 24, "y": 916, "w": 1872, "h": 140},
+  {"handler": "clock", "x": 24, "y": 916, "w": 1872, "h": 140}
+]

@@ -24,9 +24,8 @@ from sync_leantime import (
     blocking_ids, chain_order, is_priority, overdue, plan_moves, render_plan,
     render_today, roll_values, week_deadline,
 )
-from tvgui import (
-    enabled_status, fmt_total, newly_enabled, plan_height, today_offset_weeks, today_pages,
-)
+from panels import fmt_total, plan_height, today_offset_weeks, today_pages
+from tvgui import enabled_status, newly_enabled
 from nfc import _run_fake, split_here
 from punches import fix_punch, list_punches, parse_time_of_day
 from netstatus import bars, classify
@@ -747,6 +746,21 @@ class FakeNfcTests(unittest.TestCase):
             self.assertEqual(kinds[1][2], IN)
             self.assertEqual(store.get("alice").role, Role.MENTOR)
             self.assertEqual([m.username for m, _ in store.who()], ["alice"])
+
+
+class GoldenRenderTests(unittest.TestCase):
+    """The default screen must not change unless py/golden/wall.png is regenerated on purpose:
+    .venv/bin/python py/tvgui.py render py/golden/wall.png (pixels depend on this machine's FreeSans/pygame)."""
+
+    def test_default_screen_matches_golden(self):
+        try:
+            import pygame
+        except ImportError:
+            self.skipTest("pygame not installed")
+        from fixture import render
+
+        golden = pygame.image.load(os.path.join(os.path.dirname(__file__), "golden", "wall.png"))
+        self.assertEqual(pygame.image.tobytes(render(), "RGB"), pygame.image.tobytes(golden, "RGB"))
 
 
 if __name__ == "__main__":

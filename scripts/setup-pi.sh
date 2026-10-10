@@ -15,6 +15,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 sudo mkdir -p /usr/local/share/tvgui /var/lib/tvgui /etc/X11 /etc/tvgui
 sudo cp "$ROOT/py/"*.py "$ROOT/py/xsession.sh" /usr/local/share/tvgui/
+sudo cp -r "$ROOT/py/handlers" "$ROOT/py/layouts" /usr/local/share/tvgui/
 if [[ ! -f /var/lib/tvgui/plan.md ]]; then
   sudo cp "$ROOT/deploy/plan.md" /var/lib/tvgui/plan.md
 fi
