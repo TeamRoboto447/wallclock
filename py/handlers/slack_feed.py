@@ -4,7 +4,7 @@ opts: channel (default $TVGUI_SLACK_CHANNEL), title, limit."""
 import pygame
 
 import slack
-from panels import (BEIGE, BLUE, BORDER, CORAL, INK, LTRED, MUTED, age_text, border_state, draw_freshness, panel_bg,
+from panels import (BEIGE, BLUE, BORDER, CORAL, INK, LTRED, MUTED, RADIUS, age_text, border_state, draw_freshness, panel_bg,
                     wrap_text)
 
 INTERVAL = 15
@@ -41,9 +41,9 @@ def draw(surf, rect, ctx, opts):
     state = border_state(ctx.now - msgs[0]["ts"]) if msgs else "idle"
     if state == "flash":
         ctx.want_tick(0.5)
-        pygame.draw.rect(surf, BLUE if ctx.beat % 2 == 0 else LTRED, rect, 8)
+        pygame.draw.rect(surf, BLUE if ctx.beat % 2 == 0 else LTRED, rect, 8, border_radius=RADIUS)
     elif state == "red":
         ctx.want_tick(1)  # so the switch to the idle border happens on time
-        pygame.draw.rect(surf, LTRED, rect, 8)
+        pygame.draw.rect(surf, LTRED, rect, 8, border_radius=RADIUS)
     else:
-        pygame.draw.rect(surf, BORDER, rect, 2)
+        pygame.draw.rect(surf, BORDER, rect, 2, border_radius=RADIUS)

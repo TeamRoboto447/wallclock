@@ -18,6 +18,7 @@ STATUS_COLOR = {"new": BLUE, "wip": YELLOW, "blocked": LTRED, "done": GREEN}
 MUTED = (0x8A, 0x8C, 0xA8)
 MD_MARK = {"more": ("", MUTED), "todo": ("[ ]", BLUE), "wip": ("[~]", YELLOW), "blocked": ("[!]", LTRED), "done": ("[x]", GREEN)}
 PANEL = (0x0E, 0x0D, 0x24)
+RADIUS = 6  # corner radius of panels and the Slack border
 PANEL_ALPHA = 215  # panels are translucent so the background art shows through
 BORDER = (0x4B, 0x43, 0xB0)
 GRID = (0x2C, 0x2A, 0x5A)
@@ -346,6 +347,6 @@ def panel_bg(surf, rect, color=PANEL, alpha=PANEL_ALPHA):
     key = (rect.size, color, alpha)
     if key not in _shells:
         _shells[key] = pygame.Surface(rect.size, pygame.SRCALPHA)
-        _shells[key].fill((*color, alpha))
+        pygame.draw.rect(_shells[key], (*color, alpha), _shells[key].get_rect(), border_radius=RADIUS)
     surf.blit(_shells[key], rect.topleft)
-    pygame.draw.rect(surf, BORDER, rect, 1)
+    pygame.draw.rect(surf, BORDER, rect, 1, border_radius=RADIUS)
