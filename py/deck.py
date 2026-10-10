@@ -155,8 +155,10 @@ class Deck:
         return specs
 
     def who_event(self, i, now, n):
-        """('overlay', title, [(name, enabled)], secs) for the pick key i, or None if it is not one."""
+        """('overlay', title, [(heading|None, [(name, enabled)])], secs) for the pick key i, or None if it is not one.
+        Holding GENERAL gives the overview: every active milestone with the people on it."""
         rows, title, want = self._rows(), None, None
+        people = lambda keep: sorted(((r[0], r[2]) for r in rows if keep(r)), key=lambda p: p[0].lower())
         if self.pick == "work":
             milestones, tasks = self.work(now)
             slots = n - 3
@@ -171,13 +173,17 @@ class Deck:
                 if i < len(page):
                     title, want = page[i], lambda r: _field(r, 5) == page[i]
                 elif i == n - 2:
-                    title, want = "General", lambda r: _field(r, 5) == "General"
+                    groups = [(f"{m} ({len(p)})", p) for m in milestones for p in [people(lambda r, m=m: _field(r, 5) == m)]]
+                    for name, keep in (("General", lambda r: _field(r, 5) == "General"), ("no project", lambda r: not _field(r, 5))):
+                        p = people(keep)
+                        if p or name == "General":
+                            groups.append((f"{name} ({len(p)})", p))
+                    return ("overlay", f"Who's on what ({len(rows)} here)", groups, OVERLAY_SECS)
         elif self.pick == "location" and i < len(self.locations):
             title, want = self.locations[i], lambda r: _field(r, 4) == self.locations[i]
         if title is None:
             return None
-        people = sorted(((r[0], r[2]) for r in rows if want(r)), key=lambda p: p[0].lower())
-        return ("overlay", title, people, OVERLAY_SECS)
+        return ("overlay", title, [(None, people(want))], OVERLAY_SECS)
 
     def press(self, i, now, n=15, long=False):
         if now < self.overlay_until and i == n - 1 and not ADMIN.is_open(now):  # CLOSE

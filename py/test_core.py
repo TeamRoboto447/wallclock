@@ -1357,10 +1357,11 @@ class WorkTests(unittest.TestCase):
         self.state["students"] = [("Zed", 0, True, 0, None, "Alpha", "Fix arm", "Z"), ("Amy", 0, False, 0, None, "Alpha", None, "A"),
                                   ("Bo", 0, False, 0, None, "Beta", None, "B"), ("Cy", 0, False, 0, None, "General", None, "C")]
         deck.press(0, 1000, long=True)
-        self.assertEqual(self.events(), [("overlay", "Alpha", [("Amy", False), ("Zed", True)], 10)])
+        self.assertEqual(self.events(), [("overlay", "Alpha", [(None, [("Amy", False), ("Zed", True)])], 10)])
         self.assertIsNone(WORK.peek())                                          # a long press does not arm
-        deck.press(13, 1001, long=True)                                         # GENERAL
-        self.assertEqual(self.events()[0][1:3], ("General", [("Cy", False)]))
+        deck.press(13, 1001, long=True)                                         # GENERAL: overview of every milestone
+        self.assertEqual(self.events()[0][1:3], ("Who's on what (4 here)",
+                         [("Alpha (2)", [("Amy", False), ("Zed", True)]), ("Beta (1)", [("Bo", False)]), ("General (1)", [("Cy", False)])]))
         self.assertEqual(deck.keys(1001)[14][:2], ("CLOSE", "overlay"))        # the overlay can be dismissed from the deck
         deck.press(14, 1001)
         self.assertEqual(self.events(), [("overlay_close",)])
@@ -1370,7 +1371,7 @@ class WorkTests(unittest.TestCase):
         self.assertEqual(deck.keys(1001 + 11)[14][0], "ADMIN")                 # or it expires on its own
         deck.press(0, 1002)                                                     # a tap on a milestone with tasks opens its page
         deck.press(0, 1003, long=True)
-        self.assertEqual(self.events(), [("overlay", "Alpha › Fix arm", [("Zed", True)], 10)])
+        self.assertEqual(self.events(), [("overlay", "Alpha › Fix arm", [(None, [("Zed", True)])], 10)])
         deck.press(14, 1004, long=True)                                         # overlay is up: the last key is CLOSE
         self.assertEqual(self.events(), [("overlay_close",)])
         deck.press(10, 1004, long=True)                                         # an empty slot is not a pick key
@@ -1378,7 +1379,7 @@ class WorkTests(unittest.TestCase):
         loc = Deck(self.store, self.state, self.q, locations=["pit"])
         self.state["students"] = [("Ann", 0, False, 0, "pit", None, None, "A")]
         loc.press(0, 1005, long=True)
-        self.assertEqual(self.events(), [("overlay", "pit", [("Ann", False)], 10)])
+        self.assertEqual(self.events(), [("overlay", "pit", [(None, [("Ann", False)])], 10)])
 
     def test_overlay_renders_with_few_many_and_no_people(self):
         try:
@@ -1391,7 +1392,10 @@ class WorkTests(unittest.TestCase):
         f = pygame.font.Font(None, 30)
         for people in ([], [("Ann", True)], [(f"Person {i}", i % 2 == 0) for i in range(50)]):
             surf = pygame.Surface((1920, 1080))
-            draw_overlay(surf, (1920, 1080), "Shop Organization", people, f, f)
+            draw_overlay(surf, (1920, 1080), "Shop Organization", [(None, people)], f, f)
+        many = [(f"Milestone {k} ({k})", [(f"Person {i}", i % 2 == 0) for i in range(k * 3)]) for k in range(12)]
+        for groups in (many, [("Empty (0)", [])]):
+            draw_overlay(pygame.Surface((1920, 1080)), (1920, 1080), "Who's on what", groups, f, f)     # sections, incl. empty and overflow
 
     def test_paging_and_task_page_timeout(self):
         self.deck.press(12, 1000)

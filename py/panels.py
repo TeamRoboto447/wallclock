@@ -458,25 +458,75 @@ def panel_bg(surf, rect, color=PANEL, alpha=PANEL_ALPHA):
     pygame.draw.rect(surf, BORDER, rect, 1, border_radius=RADIUS)
 
 
-def draw_overlay(surf, size, title, people, font_mid, font_sm):
-    """A temporary centred panel on top of the whole screen: title and a list of (name, enabled), three columns."""
+def _flow_lines(font, people, max_w):
+    """Greedy-wrap names into lines of [(name, enabled)] no wider than max_w (separators included)."""
+    sep, lines, line, used = font.size("  ·  ")[0], [], [], 0
+    for name, enabled in people:
+        w = font.size(name)[0]
+        if line and used + sep + w > max_w:
+            lines.append(line)
+            line, used = [], 0
+        used += (sep if line else 0) + w
+        line.append((name, enabled))
+    return lines + ([line] if line else [])
+
+
+def draw_overlay(surf, size, title, groups, font_mid, font_sm):
+    """A temporary centred panel over the whole screen. groups = [(heading or None, [(name, enabled)])]: one
+    headingless group is a list in three columns, headed groups are sections of wrapped names (the overview)."""
     import pygame
 
-    w = min(1100, size[0] - 160)
-    cols = 3
-    shown = people[:36]
-    rows = max(1, -(-len(shown) // cols))
-    rect = pygame.Rect(0, 0, w, 110 + rows * 40 + (34 if len(people) > len(shown) else 0))
+    w = min(1100 if len(groups) == 1 and groups[0][0] is None else 1400, size[0] - 160)
+    sections = not (len(groups) == 1 and groups[0][0] is None)
+    if not sections:
+        people = groups[0][1]
+        shown = people[:36]
+        rows = max(1, -(-len(shown) // 3))
+        rect = pygame.Rect(0, 0, w, 110 + rows * 40 + (34 if len(people) > len(shown) else 0))
+        rect.center = (size[0] // 2, size[1] // 2)
+        panel_bg(surf, rect, PANEL, 252)
+        pygame.draw.rect(surf, BORDER, rect, 3, border_radius=RADIUS * 2)
+        surf.blit(font_mid.render(f"{title} ({len(people)})", True, CORAL), (rect.x + 28, rect.y + 22))
+        if not people:
+            surf.blit(font_sm.render("nobody yet", True, MUTED), (rect.x + 28, rect.y + 78))
+        col_w = (rect.width - 56) // 3
+        for i, (name, enabled) in enumerate(shown):
+            while len(name) > 1 and font_mid.size(name)[0] > col_w - 16:
+                name = name[:-1]
+            surf.blit(font_mid.render(name, True, GREEN if enabled else INK), (rect.x + 28 + (i // rows) * col_w, rect.y + 78 + (i % rows) * 40))
+        if len(people) > len(shown):
+            surf.blit(font_sm.render(f"+{len(people) - len(shown)} more", True, MUTED), (rect.x + 28, rect.bottom - 34))
+        return
+    laid, height = [], 90
+    for heading, people in groups:
+        lines = _flow_lines(font_sm, people, w - 56)
+        need = 42 + max(1, len(lines)) * 32 + 8
+        if height + need > size[1] - 120:
+            laid.append((f"+{len(groups) - len(laid)} more", []))
+            height += 42
+            break
+        laid.append((heading, lines))
+        height += need
+    rect = pygame.Rect(0, 0, w, height + 20)
     rect.center = (size[0] // 2, size[1] // 2)
     panel_bg(surf, rect, PANEL, 252)
     pygame.draw.rect(surf, BORDER, rect, 3, border_radius=RADIUS * 2)
-    surf.blit(font_mid.render(f"{title} ({len(people)})", True, CORAL), (rect.x + 28, rect.y + 22))
-    if not people:
-        surf.blit(font_sm.render("nobody yet", True, MUTED), (rect.x + 28, rect.y + 78))
-    col_w = (rect.width - 56) // cols
-    for i, (name, enabled) in enumerate(shown):
-        while len(name) > 1 and font_mid.size(name)[0] > col_w - 16:
-            name = name[:-1]
-        surf.blit(font_mid.render(name, True, GREEN if enabled else INK), (rect.x + 28 + (i // rows) * col_w, rect.y + 78 + (i % rows) * 40))
-    if len(people) > len(shown):
-        surf.blit(font_sm.render(f"+{len(people) - len(shown)} more", True, MUTED), (rect.x + 28, rect.bottom - 34))
+    surf.blit(font_mid.render(title, True, INK), (rect.x + 28, rect.y + 20))
+    y = rect.y + 80
+    sep = font_sm.render("  ·  ", True, MUTED)
+    for heading, lines in laid:
+        surf.blit(font_mid.render(heading, True, CORAL), (rect.x + 28, y))
+        y += 42
+        for line in lines or [None]:
+            x = rect.x + 28
+            if line is None:
+                surf.blit(font_sm.render("—", True, MUTED), (x, y))
+            for i, (name, enabled) in enumerate(line or []):
+                if i:
+                    surf.blit(sep, (x, y))
+                    x += sep.get_width()
+                img = font_sm.render(name, True, GREEN if enabled else INK)
+                surf.blit(img, (x, y))
+                x += img.get_width()
+            y += 32
+        y += 8
