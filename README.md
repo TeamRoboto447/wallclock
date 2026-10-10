@@ -9,6 +9,8 @@ Python 3 + Debian Trixie packages only. No compile, no cross-build. Pygame on Xo
 Raspberry Pi OS Lite 64-bit (Trixie). SSH/kiosk user **`lvuser`** (FRC RoboRIO/SystemCore convention). HDMI via Xorg. Reader via **pcscd**. Speech: Piper **Bryce** → PipeWire HDMI sink (`alsa-hdmi`, never suspends).
 
 NTAG write-password comes from `TVGUI_TAG_SECRET` in `/etc/tvgui/kiosk.env` (not in git). systemd loads it via `EnvironmentFile`.
+`kiosk.env.example` lists the settings you normally need (tokens, frc.nexus event/team, Slack channel, layout, clock-in rules); copy it
+to `/etc/tvgui/kiosk.env` on the Pi or `./kiosk.env` on a laptop and fill it in.
 
 ```bash
 ./scripts/setup-pi.sh
